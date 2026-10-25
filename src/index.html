@@ -41,7 +41,8 @@
       <label>Speech-to-text model <input id="s-sttModel" /></label>
       <label>Audio source
         <select id="s-source" disabled>
-          <option value="system">Only other people (laptop audio) — your mic is never used</option>
+          <option value="both">Interviewer (laptop audio) and you (microphone)</option>
+          <option value="system">Interviewer only — microphone is off</option>
         </select>
       </label>
       <label>Language they speak
@@ -73,7 +74,7 @@
       <div class="hint">
         <div class="hint-title">Ready when you are</div>
         <dl>
-          <dt><kbd>⌘⇧L</kbd></dt><dd>Live listen, answers questions automatically</dd>
+          <dt><kbd>⌘⇧L</kbd></dt><dd>Live listen to both sides, answers from the conversation</dd>
           <dt><kbd>⌘⇧R</kbd></dt><dd>Record once, then answer</dd>
           <dt><kbd>⌘⇧↩</kbd></dt><dd>Read the screen and answer</dd>
           <dt><kbd>⌘⇧I</kbd></dt><dd>Type a question</dd>
@@ -88,7 +89,7 @@
     <footer class="no-drag">
       <button id="btn-mic" class="ctl" title="Record once, then answer (⌘⇧R)"><span class="ic">🎙</span><span class="lbl">Record</span></button>
       <button id="btn-live" class="ctl" title="Live listen, auto-answer (⌘⇧L)"><span class="ic">◉</span><span class="lbl">Live</span></button>
-      <button id="btn-source" class="src" title="Listening to other people only (laptop audio). Your mic is never used.">Sys</button>
+      <button id="btn-source" class="src" title="Listening to the interviewer (laptop audio) and you (microphone). Use headphones.">Both</button>
       <button id="btn-screen" class="ctl" title="Read screen (⌘⇧Enter)"><span class="ic">🖥</span></button>
       <input id="input" placeholder="Ask anything…" />
     </footer>

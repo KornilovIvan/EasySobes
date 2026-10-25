@@ -3,6 +3,3 @@ dist/
 .DS_Store
 *.log
 *.tmp
-# Local project notes for Claude Code; they mention the owner's own interviews, so they stay private.
-CLAUDE.md
-.claude/

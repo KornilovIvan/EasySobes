@@ -1,19 +1,21 @@
 // Renderer-side audio capture. Owned by the audio workstream (Phase 2A).
 // Uses shared helpers from renderer.js via window.app.
 //
-// Source: system audio ONLY — getDisplayMedia() answered with loopback audio by
-// audio-main.js. Owner rule: EasySobes hears the other people, never the owner's mic.
-// There is no mic/both mode and no fallback to the mic.
+// Two sources at once. System audio (getDisplayMedia loopback from audio-main.js) is the
+// interviewer. The microphone is the candidate. They stay separate so each line in the
+// conversation log has a speaker. There is no fallback from one to the other.
 // Modes:
 //   ⌘⇧R  manual push-to-record (window.audio.toggleRecording)
-//   ⌘⇧L  continuous listen: voice-activity detection cuts segments on ~1.2s of
-//        silence, transcribes them, and auto-answers questions.
+//   ⌘⇧L  continuous listen: voice-activity detection cuts segments on silence,
+//        transcribes them, and auto-answers questions. The interviewer waits 2.5s
+//        so a pause inside a question stays one piece. ⌘⇧R sends that piece now.
 (() => {
   const { $, run, addMessage, setStatus, escapeHtml } = window.app;
   const app = window.app;
 
   // VAD tuning
-  const SILENCE_MS = 1200; // silence after speech that ends a segment
+  const SILENCE_MS = 1200; // candidate: a short pause already ends their turn
+  const INTERVIEWER_SILENCE_MS = 2500; // interviewer: a pause inside a question is not the end
   const MIN_SPEECH_MS = 400; // ignore clicks/coughs shorter than this
   const MAX_SEGMENT_MS = 30000; // force a cut on very long monologues
   const IDLE_ROTATE_MS = 10000; // start a fresh segment if nobody talks, to drop dead air
@@ -35,20 +37,21 @@
   // ---------- source selection ----------
 
   function getSource() {
-    return 'system';
+    if (live && !live.hasMic) return 'system';
+    return 'both';
   }
 
-  // Kept for the UI's sake: any request just re-asserts system audio.
+  // Live listen always hears both sides. The button and the settings row only report that.
   function setSource() {
     try {
       localStorage.removeItem('audioSource');
     } catch {}
-    emit({ source: 'system' });
+    emit({ source: getSource() });
   }
 
   function cycleSource() {
     setSource();
-    return 'system';
+    return getSource();
   }
 
   async function getSystemStream() {
@@ -73,8 +76,7 @@
     } catch (err) {
       if (!quiet) addMessage('error', escapeHtml(
         `System audio capture failed (${err.message || err.name}). ` +
-        'On macOS, allow EasySobes under System Settings → Privacy & Security → Screen & System Audio Recording. ' +
-        'Your microphone is never used as a fallback.'
+        'On macOS, allow the app that starts EasySobes (Terminal or VS Code) under System Settings → Privacy & Security → Screen & System Audio Recording.'
       ));
       throw new Error('system audio unavailable');
     }
@@ -84,14 +86,10 @@
 
   // ---------- shared answer flow ----------
 
-  function answer(transcript, icon) {
-    const label = `${icon} ${transcript}`;
-    return run(label, () =>
-      window.sobes.ask({
-        text: `This was just said in my conversation:\n"${transcript}"\n\nHelp me respond. Give the answer I should say.`,
-        label,
-      })
-    );
+  function answer(transcript, role) {
+    const label = `${role === 'me' ? '🎤' : '🎧'} ${transcript}`;
+    const text = dialogueText(role);
+    return run(label, () => window.sobes.ask({ text, dialogue: true, label }));
   }
 
   // ---------- manual push-to-record (⌘⇧R) ----------
@@ -194,12 +192,13 @@
   let manual = null; // { capture, ctx, tap, timer } while manually recording
 
   async function transcribeAndAnswer(buffer) {
-    emit({ mode: 'off', phase: 'transcribing', level: 0 });
+    emit({ mode: 'off', phase: 'transcribing', level: 0, source: getSource() });
     try {
       const transcript = ((await window.sobes.transcribe(buffer)) || '').trim();
       emit({ phase: 'idle' });
       if (!transcript) return setStatus('No speech detected');
-      answer(transcript, '🎙');
+      remember('interviewer', transcript);
+      answer(transcript, 'interviewer');
     } catch (err) {
       emit({ phase: 'idle' });
       addMessage('error', escapeHtml(err.message));
@@ -216,7 +215,7 @@
     m.ctx.close().catch(() => {});
     m.capture.stop();
     if (samples.length < m.ctx.sampleRate * 0.3) {
-      emit({ mode: 'off', phase: 'idle', level: 0 });
+      emit({ mode: 'off', phase: 'idle', level: 0, source: getSource() });
       return setStatus('Nothing recorded');
     }
     transcribeAndAnswer(toWav(samples, m.ctx.sampleRate));
@@ -224,9 +223,12 @@
 
   async function toggleRecording() {
     if (live) {
-      // In live mode ⌘⇧R means "answer what was just said, now".
-      live.forceCut = true;
-      cutSegment();
+      // In live mode ⌘⇧R means "answer what the interviewer just said, now".
+      const ear = live.ears.find((e) => e.role === 'interviewer') || live.ears[0];
+      if (ear) {
+        ear.forceCut = true;
+        cutEar(ear);
+      }
       return;
     }
     if (manual) return stopManual();
@@ -236,7 +238,7 @@
     try {
       capture = await openSource();
     } catch {
-      emit({ mode: 'off', level: 0 });
+      emit({ mode: 'off', level: 0, source: getSource() });
       return;
     }
     const ctx = new AudioContext();
@@ -254,22 +256,150 @@
       emit({ level: meterLevel(r), phase: r > MIN_THRESHOLD ? 'speech' : 'idle' });
     }, 80);
     manual = { capture, ctx, tap, timer };
-    emit({ mode: 'recording', phase: 'idle', source: capture.source, since: Date.now() });
+    emit({ mode: 'recording', phase: 'idle', source: getSource(), since: Date.now() });
+  }
+
+  // ---------- conversation memory ----------
+  // Both sides are kept for this sitting. Clear (⌘⇧K) drops it. Older turns are
+  // compressed so a long interview still fits in the free-tier token budget.
+
+  const KEEP_RAW = 14;
+  const SUMMARIZE_AT = 20;
+  const conversation = { turns: [], summary: '' };
+  let generation = 0;
+  let summarizing = false;
+  let summaryFailedAt = 0;
+
+  function clearConversation() {
+    generation++;
+    conversation.turns = [];
+    conversation.summary = '';
+    summarizing = false;
+  }
+
+  function remember(role, text) {
+    const line = String(text || '').trim();
+    if (!line) return;
+    const last = conversation.turns[conversation.turns.length - 1];
+    if (last && last.role === role && last.text === line) return;
+    conversation.turns.push({ role, text: line });
+    maybeSummarize();
+  }
+
+  function clip(text) {
+    return text.length > 700 ? `${text.slice(0, 700)}…` : text;
+  }
+
+  function turnsForModel() {
+    const from = conversation.turns.length > 24 ? conversation.turns.length - 24 : 0;
+    return conversation.turns.slice(from).map((t) => ({ role: t.role, text: clip(t.text) }));
+  }
+
+  function who(role) {
+    return role === 'me' ? 'Candidate' : 'Interviewer';
+  }
+
+  function dialogueText(role) {
+    const lines = [];
+    if (conversation.summary) lines.push(`Earlier in this interview:\n${conversation.summary}`);
+    const turns = turnsForModel();
+    if (turns.length) {
+      lines.push('Conversation:');
+      for (const t of turns) lines.push(`${who(t.role)}: ${t.text}`);
+    }
+    if (role === 'me') {
+      lines.push(
+        '',
+        'The candidate just asked a clarifying question (the last Candidate line). ' +
+          'Give one or two spoken sentences they can say now: a clearer version of their question if the interviewer was ambiguous, ' +
+          'otherwise the answer they should give. Stay consistent with what the candidate already said.'
+      );
+    } else {
+      lines.push(
+        '',
+        'The interviewer just spoke (the last Interviewer line). Give the answer the candidate should say next. ' +
+          'Stay consistent with what the candidate already said, and do not repeat it.'
+      );
+    }
+    return lines.join('\n');
+  }
+
+  // For typed questions and screen asks: the transcript without a "who just spoke" instruction.
+  function dialoguePrefix() {
+    const lines = [];
+    if (conversation.summary) lines.push(`Earlier in this interview:\n${conversation.summary}`);
+    const turns = turnsForModel();
+    if (!conversation.summary && !turns.length) return '';
+    if (turns.length) {
+      lines.push('Conversation so far:');
+      for (const t of turns) lines.push(`${who(t.role)}: ${t.text}`);
+    }
+    lines.push('', 'Use this conversation when you answer. Do not contradict the candidate or repeat what they already said.');
+    return lines.join('\n');
+  }
+
+  function maybeSummarize() {
+    if (summarizing || Date.now() - summaryFailedAt < 60000) return;
+    if (conversation.turns.length <= SUMMARIZE_AT) return;
+    const end = conversation.turns.length - KEEP_RAW;
+    if (end <= 0) return;
+    const slice = conversation.turns.slice(0, end).map((t) => ({ role: t.role, text: clip(t.text) }));
+    const prior = conversation.summary;
+    const gen = generation;
+    summarizing = true;
+    window.sobes
+      .invoke('summarize-turns', { summary: prior, turns: slice })
+      .then((summary) => {
+        if (gen !== generation) return;
+        const text = String(summary || '').trim();
+        if (!text) throw new Error('empty summary');
+        conversation.summary = text;
+        conversation.turns.splice(0, end);
+      })
+      .catch((err) => {
+        summaryFailedAt = Date.now();
+        diag(`summary failed: ${err && err.message ? err.message : err}`);
+      })
+      .finally(() => {
+        summarizing = false;
+      });
+  }
+
+  function normalize(s) {
+    return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  // The mic often hears the interviewer through speakers. Drop that copy.
+  function isEcho(role, text) {
+    if (role !== 'me') return false;
+    const n = normalize(text);
+    if (n.length < 8) return false;
+    return conversation.turns.slice(-4).some((t) => {
+      if (t.role !== 'interviewer') return false;
+      const o = normalize(t.text);
+      if (!o) return false;
+      if (o === n) return true;
+      const shorter = o.length < n.length ? o : n;
+      const longer = o.length < n.length ? n : o;
+      return shorter.length > 24 && longer.includes(shorter);
+    });
   }
 
   // ---------- continuous listen mode (⌘⇧L) ----------
 
-  let live = null; // state object while live mode is on
+  let live = null; // { ctx, ears, system, micStream, hasMic, timer } while live mode is on
   let starting = false;
-  let pending = null; // at most one queued segment { buffer, force }
+  const segmentQueue = [];
   let processing = false;
+  let transcribing = false;
 
   // wantLive = the user wants to be listening (auto-start or ⌘⇧L). While it is true,
-  // any capture/recorder failure reconnects on its own instead of turning live off,
+  // any capture failure reconnects on its own instead of turning live off,
   // because the owner can't press anything during an interview.
   let wantLive = false;
   let retries = 0;
   let retryTimer = null;
+  let micWarned = false;
   const RETRY_MS = [500, 1000, 2000, 4000, 8000]; // then every 8s, forever
 
   function recover(why) {
@@ -283,55 +413,108 @@
     retryTimer = setTimeout(() => startLive(true), wait);
   }
 
-  async function startLive(quiet = false) {
-    if (live || starting) return;
-    wantLive = true;
-    if (manual) stopManual();
-    starting = true;
-    emit({ mode: 'starting', level: 0 });
-    let capture;
-    try {
-      capture = await openSource(quiet);
-    } catch {
-      starting = false;
-      recover('no system audio');
-      return;
-    }
-    starting = false;
-    if (!wantLive) return capture.stop(); // stopped while we were opening
-    const ctx = new AudioContext();
-    ctx.resume().catch(() => {});
-    const tap = pcmTap(ctx, capture.stream);
+  async function openMic() {
+    const allowed = await window.sobes.invoke('ensure-mic');
+    if (!allowed) throw new Error('permission denied');
+    return navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+      video: false,
+    });
+  }
+
+  function makeEar(role, stream, ctx) {
+    const tap = pcmTap(ctx, stream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
     tap.src.connect(analyser);
-
-    const l = {
+    return {
+      role,
       tap,
-      capture,
-      source: capture.source,
-      ctx,
       analyser,
       data: new Float32Array(analyser.fftSize),
+      rate: ctx.sampleRate,
       noise: 0.005,
       recStart: 0,
       speechMs: 0,
       speaking: false,
       lastVoice: 0,
       forceCut: false,
-      timer: null,
+      peak: 0,
     };
+  }
+
+  async function startLive(quiet = false) {
+    if (live || starting) return;
+    wantLive = true;
+    if (manual) stopManual();
+    starting = true;
+    emit({ mode: 'starting', level: 0, source: 'both' });
+    let system;
+    try {
+      system = await openSource(quiet);
+    } catch {
+      starting = false;
+      recover('no system audio');
+      return;
+    }
+    starting = false;
+    if (!wantLive) return system.stop();
+
+    let micStream = null;
+    try {
+      micStream = await openMic();
+    } catch (err) {
+      diag(`mic unavailable: ${err.message || err}`);
+      if (!quiet && !micWarned) {
+        micWarned = true;
+        addMessage('error', escapeHtml(
+          'Your microphone is off, so your own answers are not in the conversation. ' +
+          'Allow the microphone for the app that starts EasySobes (Terminal or VS Code) under System Settings → Privacy & Security → Microphone, then turn Live off and on.'
+        ));
+      }
+    }
+    if (!wantLive) {
+      system.stop();
+      micStream?.getTracks().forEach((t) => t.stop());
+      return;
+    }
+
+    const ctx = new AudioContext();
+    ctx.resume().catch(() => {});
+    const ears = [makeEar('interviewer', system.stream, ctx)];
+    if (micStream) ears.push(makeEar('me', micStream, ctx));
+    const l = { ctx, ears, system, micStream, hasMic: !!micStream, timer: null };
     live = l;
-    capture.stream.getAudioTracks().forEach((t) =>
+    system.stream.getAudioTracks().forEach((t) =>
       t.addEventListener('ended', () => {
         if (live === l) recover('audio track ended');
       })
     );
-    newSegment(l);
+    if (micStream) {
+      micStream.getAudioTracks().forEach((t) =>
+        t.addEventListener('ended', () => {
+          if (live !== l) return;
+          const ear = l.ears.find((e) => e.role === 'me');
+          if (ear) ear.tap.stop();
+          l.ears = l.ears.filter((e) => e.role !== 'me');
+          l.hasMic = false;
+          emit({ source: 'system' });
+          addMessage('error', escapeHtml(
+            'Microphone stopped. The interviewer is still heard; your voice is no longer added to the conversation.'
+          ));
+        })
+      );
+    }
+    ears.forEach(newSegment);
     l.timer = setInterval(tick, TICK_MS);
     if (retries) window.sobes.send?.('log', 'live: reconnected');
     retries = 0;
-    emit({ mode: 'live', phase: processing ? 'transcribing' : 'idle', source: capture.source, since: Date.now() });
+    emit({
+      mode: 'live',
+      phase: transcribing ? 'transcribing' : 'idle',
+      source: l.hasMic ? 'both' : 'system',
+      since: Date.now(),
+    });
   }
 
   function stopLive(reconnecting = false) {
@@ -339,24 +522,21 @@
       wantLive = false;
       clearTimeout(retryTimer);
       retries = 0;
+      micWarned = false;
     }
     if (!live) {
-      if (!reconnecting) emit({ mode: 'off', level: 0 });
+      if (!reconnecting) emit({ mode: 'off', level: 0, source: 'both' });
       return;
     }
     const l = live;
     live = null;
     clearInterval(l.timer);
-    l.tap.stop(); // the unfinished segment is discarded
+    l.ears.forEach((e) => e.tap.stop());
     l.ctx.close().catch(() => {});
-    l.capture.stop();
+    l.system.stop();
+    l.micStream?.getTracks().forEach((t) => t.stop());
     if (reconnecting) return;
-    emit({ mode: 'off', phase: processing ? 'transcribing' : 'idle', level: 0 });
-  }
-
-  async function restartLive() {
-    stopLive();
-    await startLive();
+    emit({ mode: 'off', phase: transcribing ? 'transcribing' : 'idle', level: 0, source: 'both' });
   }
 
   function toggleLive() {
@@ -369,117 +549,165 @@
   // apart from "it heard it but chose not to answer".
   const diag = (msg) => window.sobes.send?.('log', `live: ${msg}`);
 
-  function newSegment(l) {
-    l.peak = 0;
-    l.recStart = performance.now();
-    l.speechMs = 0;
-    l.speaking = false;
+  function newSegment(ear) {
+    ear.peak = 0;
+    ear.recStart = performance.now();
+    ear.speechMs = 0;
+    ear.speaking = false;
   }
 
-  // Hand the current segment off (if someone spoke) and start the next one.
-  function cutSegment() {
-    const l = live;
-    if (!l) return;
-    const hadSpeech = l.speechMs >= MIN_SPEECH_MS;
-    const force = l.forceCut;
-    l.forceCut = false;
-    const secs = ((performance.now() - l.recStart) / 1000).toFixed(1);
-    if (l.peak > 0.002 || hadSpeech || force) {
-      diag(`segment ${secs}s speech=${l.speechMs}ms peak=${l.peak.toFixed(3)} → ${hadSpeech || force ? 'sent to Whisper' : 'dropped (too little speech)'}`);
+  function earRms(ear) {
+    ear.analyser.getFloatTimeDomainData(ear.data);
+    let sum = 0;
+    for (let i = 0; i < ear.data.length; i++) sum += ear.data[i] * ear.data[i];
+    return Math.sqrt(sum / ear.data.length);
+  }
+
+  // Hand this speaker's current segment off (if someone spoke) and start the next one.
+  function cutEar(ear) {
+    if (!live || !live.ears.includes(ear)) return;
+    const hadSpeech = ear.speechMs >= MIN_SPEECH_MS;
+    const force = ear.forceCut;
+    ear.forceCut = false;
+    const secs = ((performance.now() - ear.recStart) / 1000).toFixed(1);
+    if (ear.peak > 0.002 || hadSpeech || force) {
+      diag(
+        `${ear.role} segment ${secs}s speech=${ear.speechMs}ms peak=${ear.peak.toFixed(3)} → ${
+          hadSpeech || force ? 'sent to Whisper' : 'dropped (too little speech)'
+        }`
+      );
     }
     if (hadSpeech || force) {
-      const samples = l.tap.take();
-      if (samples.length >= l.ctx.sampleRate * 0.3) enqueue({ buffer: toWav(samples, l.ctx.sampleRate), force });
+      const samples = ear.tap.take();
+      if (samples.length >= ear.rate * 0.3) enqueue({ buffer: toWav(samples, ear.rate), role: ear.role, force });
     } else {
-      l.tap.clear(0.5);
+      ear.tap.clear(0.5);
     }
-    newSegment(l);
-  }
-
-  function rms() {
-    const { analyser, data } = live;
-    analyser.getFloatTimeDomainData(data);
-    let sum = 0;
-    for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
-    return Math.sqrt(sum / data.length);
+    newSegment(ear);
   }
 
   function tick() {
     const l = live;
     if (!l) return;
     const now = performance.now();
-    const level = rms();
-    if (level > l.peak) l.peak = level;
-    const threshold = Math.max(MIN_THRESHOLD, l.noise * 3);
-    const voiced = level > threshold;
-    const phase = processing ? 'transcribing' : voiced || l.speaking ? 'speech' : 'idle';
-    l.ticks = (l.ticks || 0) + 1; // meter at ~10 fps; phase changes immediately
-    if (l.ticks % 2 === 0 || phase !== micState.phase) emit({ level: meterLevel(level), phase });
-
-    if (voiced) {
-      l.lastVoice = now;
-      l.speechMs += TICK_MS;
-      if (!l.speaking && l.speechMs >= MIN_SPEECH_MS) {
-        l.speaking = true;
+    let loud = 0;
+    let anyVoice = false;
+    for (const ear of l.ears) {
+      const level = earRms(ear);
+      if (level > loud) loud = level;
+      if (level > ear.peak) ear.peak = level;
+      const threshold = Math.max(MIN_THRESHOLD, ear.noise * 3);
+      const voiced = level > threshold;
+      if (voiced || ear.speaking) anyVoice = true;
+      if (voiced) {
+        ear.lastVoice = now;
+        ear.speechMs += TICK_MS;
+        if (!ear.speaking && ear.speechMs >= MIN_SPEECH_MS) ear.speaking = true;
+      } else {
+        ear.noise = level < ear.noise ? level : ear.noise * 0.995 + level * 0.005;
       }
-    } else {
-      // Track the background noise floor: fall fast, rise slowly.
-      l.noise = level < l.noise ? level : l.noise * 0.995 + level * 0.005;
+      const segAge = now - ear.recStart;
+      const silenceMs = ear.role === 'interviewer' ? INTERVIEWER_SILENCE_MS : SILENCE_MS;
+      if (ear.speaking && now - ear.lastVoice >= silenceMs) cutEar(ear);
+      else if (segAge >= MAX_SEGMENT_MS && ear.speechMs > 0) cutEar(ear);
+      else if (!ear.speaking && segAge >= IDLE_ROTATE_MS && now - ear.lastVoice >= silenceMs) cutEar(ear);
     }
-
-    const segAge = now - l.recStart;
-    if (l.speaking && now - l.lastVoice >= SILENCE_MS) {
-      cutSegment();
-    } else if (segAge >= MAX_SEGMENT_MS && l.speechMs > 0) {
-      cutSegment();
-    } else if (!l.speaking && segAge >= IDLE_ROTATE_MS && now - l.lastVoice >= SILENCE_MS) {
-      // Nothing (or only blips) said: start over so segments don't carry dead air.
-      l.speechMs = 0;
-      cutSegment();
-    }
+    const phase = transcribing ? 'transcribing' : anyVoice ? 'speech' : 'idle';
+    l.ticks = (l.ticks || 0) + 1;
+    if (l.ticks % 2 === 0 || phase !== micState.phase) emit({ level: meterLevel(loud), phase });
   }
 
   // ---------- segment queue ----------
+  // Whisper runs one phrase at a time, in order. It does not wait while a suggestion
+  // prints: that work happens alongside, and the next question starts its own suggestion.
+  // The cap only matters if recognition itself falls behind.
 
   function enqueue(item) {
-    pending = item; // keep at most one; the newest wins
+    segmentQueue.push(item);
+    if (segmentQueue.length > 40) {
+      segmentQueue.shift();
+      diag('queue overflow, dropped oldest segment');
+    }
     pump();
   }
 
-  async function pump() {
-    if (processing || !pending) return;
-    if (app.isBusy()) {
-      setTimeout(pump, 300);
-      return;
+  function showTranscript(role, text) {
+    if (role === 'me') {
+      const words = text.trim().split(/\s+/).filter(Boolean);
+      if (words.length < 4 && !candidateQuestion(text)) return;
     }
-    const { buffer, force } = pending;
-    pending = null;
+    addMessage('user', escapeHtml(`${role === 'me' ? '🎤' : '🎧'} ${text}`));
+  }
+
+  function cleanErr(err) {
+    return String(err && err.message ? err.message : err).replace(
+      /^Error invoking remote method '[^']+': (Error: )?/,
+      ''
+    );
+  }
+
+  async function pump() {
+    if (processing) return;
     processing = true;
+    let deferred = null;
+    const showDeferred = () => {
+      if (!deferred) return;
+      showTranscript(deferred.role, deferred.transcript);
+      deferred = null;
+    };
     try {
-      emit({ phase: 'transcribing' });
-      const transcript = ((await window.sobes.transcribe(buffer)) || '').trim();
-      emit({ phase: 'idle' });
-      const willAnswer = !!transcript && (force || looksLikePrompt(transcript));
-      diag(`heard "${transcript.slice(0, 200)}" → ${willAnswer ? 'answering' : transcript ? 'not a question, shown only' : 'empty'}`);
-      if (willAnswer) {
-        await answer(transcript, '🎧');
-      } else if (transcript && !isNoise(transcript)) {
-        addMessage('user', escapeHtml(`🎧 ${transcript}`));
+      while (segmentQueue.length) {
+        const item = segmentQueue.shift();
+        transcribing = true;
+        emit({ phase: 'transcribing' });
+        let transcript = '';
+        try {
+          transcript = ((await window.sobes.transcribe(item.buffer)) || '').trim();
+        } catch (err) {
+          addMessage('error', escapeHtml(cleanErr(err)));
+          continue;
+        } finally {
+          transcribing = false;
+        }
+        const action = classify(item.role, transcript, item.force);
+        diag(`${item.role} "${transcript.slice(0, 180)}" → ${action}`);
+        if (action === 'drop') continue;
+        remember(item.role, transcript);
+        if (action === 'answer') {
+          showDeferred();
+          deferred = { role: item.role, transcript };
+        } else {
+          showDeferred();
+          showTranscript(item.role, transcript);
+        }
       }
-    } catch (err) {
-      addMessage('error', escapeHtml(err.message));
+      // The suggestion prints on its own. Recognition is free to take the next phrase,
+      // and a later question becomes the next suggestion instead of waiting in a pile.
+      if (deferred) {
+        const pending = deferred;
+        deferred = null;
+        answer(pending.transcript, pending.role);
+      }
     } finally {
+      transcribing = false;
       processing = false;
       if (micState.phase === 'transcribing') emit({ phase: 'idle' });
-      if (pending) pump();
+      if (segmentQueue.length) pump();
     }
   }
 
-  // Whisper often "hears" these in silence or music.
+  // Whisper often "hears" these in silence or music. A short "yes" from the candidate
+  // is a real answer, so the mic channel only drops the obvious hallucinations.
+  const HALLUCINATION =
+    /^(thank you|thanks( for watching)?|bye|♪+|субтитры.*|редактор субтитров.*|продолжение следует|धन्यवाद|शुक्रिया|dhanyavaad|shukriya)[.!?।…\s]*$/i;
   const NOISE =
-    /^(thank you|thanks( for watching)?|you|bye|okay|ok|uh+|um+|hmm+|\.+|♪+|धन्यवाद|शुक्रिया|dhanyavaad|shukriya|ji|haan|спасибо( за просмотр)?|субтитры.*|редактор субтитров.*|продолжение следует|угу|ага|эм+|мм+)[.!?।…\s]*$/i;
-  function isNoise(t) {
-    return NOISE.test(t.trim());
+    /^(thank you|thanks( for watching)?|you|bye|okay|ok|ок|uh+|um+|hmm+|\.+|♪+|धन्यवाद|शुक्रिया|dhanyavaad|shukriya|ji|haan|спасибо( за просмотр)?|субтитры.*|редактор субтитров.*|продолжение следует|угу|ага|эм+|мм+)[.!?।…\s]*$/i;
+  function isNoise(t, role) {
+    const s = t.trim();
+    if (!s) return true;
+    if (HALLUCINATION.test(s)) return true;
+    if (role === 'me') return false;
+    return NOISE.test(s);
   }
 
   const PROMPT_START =
@@ -494,16 +722,40 @@
     /(^|[\s,.])(kya|kyu|kyun|kyon|kaise|kaisa|kaisi|kab|kahan|kaha|kaun|kon|kitna|kitne|kitni|konsa|kaunsa|batao|bataiye|bataye|samjhao|samjhaiye|sunao|dikhao|likho|baare mein|bare me|sakte ho|sakti ho|sakte hain|kijiye|kariye|karo|क्या|क्यों|कैसे|कैसा|कब|कहाँ|कहां|कौन|कितना|कितने|कौनसा|बताइए|बताइये|बताओ|बताएं|समझाइए|समझाओ|सुनाइए|बारे में|सकते हैं|सकते हो|कीजिए)(?=$|[\s,.?!।])/i;
   // \b does not see Cyrillic, so Russian words are matched as whole tokens the same way Hindi is.
   const RU_ASKS =
-    /(^|[\s,.(])(что|почему|зачем|как|какой|какая|какое|какие|когда|где|куда|откуда|кто|кого|сколько|чем|чего|расскажите|расскажи|объясните|объясни|опишите|опиши|представьтесь|назовите|скажите)(?=$|[\s,.?!…:;])/i;
-  function looksLikePrompt(t) {
-    if (isNoise(t)) return false;
+    /(^|[\s,.(])(что|почему|зачем|как|какой|какая|какое|какие|когда|где|куда|откуда|кто|кого|сколько|чем|чего|расскажите|расскажи|объясните|объясни|опишите|опиши|представьтесь|назовите|скажите|уточните|уточни)(?=$|[\s,.?!…:;])/i;
+  // A candidate's own answer often contains "как" or "что" in the middle. Only treat it as
+  // a clarifying question when it is marked as one, or when it starts like one.
+  const CANDIDATE_Q =
+    /^(what|why|how|when|where|who|which|can|could|would|do|does|did|is|are|tell|explain|describe|clarify|что|почему|зачем|как|какой|какая|какое|какие|когда|где|куда|кто|сколько|расскажите|расскажи|объясните|объясни|уточните|уточни|можно|kya|kyu|kyun|kaise|batao|bataiye)(?=$|[\s,.?!…:;])/i;
+  function looksLikeQuestion(t) {
+    if (!t || !t.trim()) return false;
     const text = t.trim();
-    if (!text) return false;
-    // "Why?", "Почему?", "Tell me." are real questions even when they are one or two words.
     if (/[?؟]/.test(text)) return true;
-    if (PROMPT_START.test(text) || ASKS.test(text) || HINDI_ASKS.test(text) || RU_ASKS.test(text)) return true;
-    const words = text.split(/\s+/).filter(Boolean);
-    return words.length >= 10; // long statements in an interview are usually prompts
+    return PROMPT_START.test(text) || ASKS.test(text) || HINDI_ASKS.test(text) || RU_ASKS.test(text);
+  }
+  function candidateQuestion(text) {
+    const line = String(text || '').trim();
+    if (!line) return false;
+    if (/[?؟]/.test(line) || CANDIDATE_Q.test(line)) return true;
+    const words = line.split(/\s+/).filter(Boolean);
+    if (words.length > 14) return false;
+    return /(уточн|поясн|имеете в виду|what do you mean|could you clarify|can you clarify|can you repeat|не расслышал)/i.test(line);
+  }
+  function looksLikePrompt(t) {
+    if (isNoise(t, 'interviewer')) return false;
+    if (looksLikeQuestion(t)) return true;
+    const words = t.trim().split(/\s+/).filter(Boolean);
+    return words.length >= 10; // long statements from the interviewer are usually prompts
+  }
+
+  function classify(role, transcript, force) {
+    const text = String(transcript || '').trim();
+    if (!text) return 'drop';
+    if (isEcho(role, text)) return 'drop';
+    if (force && role === 'interviewer') return isNoise(text, role) ? 'drop' : 'answer';
+    if (isNoise(text, role)) return 'drop';
+    if (role === 'me') return candidateQuestion(text) ? 'answer' : 'note';
+    return looksLikePrompt(text) ? 'answer' : 'note';
   }
 
   window.sobes.on('audio-toggle-live', toggleLive);
@@ -534,5 +786,7 @@
     cycleSource,
     getSource,
     setSource,
+    clearConversation,
+    dialoguePrefix,
   };
 })();

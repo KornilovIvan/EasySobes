@@ -343,11 +343,21 @@ const SCREEN_ASK =
   'If it is multiple choice, say which option is right and why. ' +
   'If there is no question at all, say in one short line what is on the screen.';
 
+// Appended only when the request includes the live transcript (both sides).
+const DIALOGUE =
+  'DIALOGUE: The user message includes a live transcript labeled Interviewer and Candidate. ' +
+  'Treat it as what was actually said. Stay consistent with the candidate and do not repeat an answer they already gave. ' +
+  'If the note says the candidate just asked a clarifying question, reply with one or two spoken sentences: ' +
+  'a clearer version of their question when the interviewer was ambiguous, otherwise the answer they should give. ' +
+  'If the note says the interviewer just spoke, reply with the words the candidate should say next.';
+
 // A screen question drops the resume: the image is the expensive part.
-function buildMessages(userContent, settings) {
+function buildMessages(userContent, settings, dialogue) {
   const hasImage = Array.isArray(userContent);
+  let content = systemPrompt(hasImage ? { ...settings, context: '' } : settings);
+  if (dialogue) content += `\n\n${DIALOGUE}`;
   return [
-    { role: 'system', content: systemPrompt(hasImage ? { ...settings, context: '' } : settings) },
+    { role: 'system', content },
     { role: 'user', content: userContent },
   ];
 }
@@ -429,11 +439,11 @@ function friendlyError(status, body) {
   return `API error ${status}: ${body.slice(0, 300)}`;
 }
 
-async function streamChat(userContent, model) {
+async function streamChat(userContent, model, dialogue) {
   const settings = currentSettings();
   if (!settings.apiKey) throw new Error('Add your API key in Settings (⚙).');
 
-  const messages = buildMessages(userContent, settings);
+  const messages = buildMessages(userContent, settings, dialogue);
   const url = `${settings.baseUrl.replace(/\/$/, '')}/chat/completions`;
   const chatModel = model || settings.chatModel;
   let maxTokens = maxTokensFor(settings, chatModel);
@@ -526,7 +536,7 @@ ipcMain.handle('pick-resume', async () => {
   return readResume(filePaths[0]);
 });
 
-ipcMain.handle('ask', async (_e, payload) => streamChat(readAsk(payload)));
+ipcMain.handle('ask', async (_e, payload) => streamChat(readAsk(payload), null, !!(payload && payload.dialogue)));
 
 // The ONLY path that sends the screen anywhere. It runs when the user asks (⌘⇧Return / 🖥).
 ipcMain.handle('ask-screen', async (_e, payload) => {
@@ -540,8 +550,67 @@ ipcMain.handle('ask-screen', async (_e, payload) => {
       { type: 'text', text: text || SCREEN_ASK },
       { type: 'image_url', image_url: { url: image } },
     ],
-    settings.visionModel
+    settings.visionModel,
+    !!(payload && payload.dialogue)
   );
+});
+
+// Fold older turns into a short memory so each answer stays inside the free-tier token budget.
+async function completeChat(messages, maxTokens) {
+  const settings = currentSettings();
+  if (!settings.apiKey) throw new Error('Add your API key in Settings (⚙).');
+  const chatModel = settings.chatModel;
+  const res = await fetch(`${settings.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` },
+    body: JSON.stringify({
+      model: chatModel,
+      messages,
+      stream: false,
+      temperature: 0.2,
+      ...(isGroq(settings) ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
+      ...reasoningOptions(chatModel, settings),
+    }),
+  });
+  if (!res.ok) throw new Error(friendlyError(res.status, await res.text()));
+  const text = (await res.json()).choices?.[0]?.message?.content;
+  if (!text || !String(text).trim()) throw new Error('empty summary');
+  return String(text).trim();
+}
+
+ipcMain.handle('summarize-turns', async (_e, payload) => {
+  const turns = Array.isArray(payload?.turns) ? payload.turns : [];
+  const prior = String(payload?.summary || '').trim();
+  const body = turns
+    .map((t) => `${t.role === 'me' ? 'Candidate' : 'Interviewer'}: ${String(t.text || '').trim()}`)
+    .filter((line) => !line.endsWith(':'))
+    .join('\n');
+  if (!body) return prior;
+  return completeChat(
+    [
+      {
+        role: 'system',
+        content:
+          'Compress an interview into at most 120 words. Keep what the candidate already said, which questions were answered, ' +
+          'and what the interviewer cared about. No advice. No quotes longer than one sentence.',
+      },
+      { role: 'user', content: `${prior ? `Earlier summary:\n${prior}\n\n` : ''}New lines:\n${body}` },
+    ],
+    1500
+  );
+});
+
+ipcMain.handle('ensure-mic', async () => {
+  if (process.platform !== 'darwin') return true;
+  try {
+    const status = systemPreferences.getMediaAccessStatus('microphone');
+    if (status === 'granted') return true;
+    if (status === 'denied' || status === 'restricted') return false;
+    return await systemPreferences.askForMediaAccess('microphone');
+  } catch (err) {
+    console.error('[audio] microphone permission:', err);
+    return false;
+  }
 });
 
 ipcMain.handle('transcribe', async (_e, audioBuffer) => {

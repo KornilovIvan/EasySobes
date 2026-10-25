@@ -311,19 +311,28 @@ async function run(label, fn) {
 function askText(text) {
   text = text.trim();
   if (!text) return;
-  run(text, () => window.sobes.ask({ text, label: text }));
+  const heard = window.audio?.dialoguePrefix?.() || '';
+  const payload = heard
+    ? { text: `${heard}\n\nThe candidate typed this request:\n${text}`, dialogue: true }
+    : { text, dialogue: false };
+  run(text, () => window.sobes.ask({ ...payload, label: text }));
 }
 
 function askScreen() {
   const text = input.value.trim();
   input.value = '';
   const label = text ? `🖥 ${text}` : '🖥 Reading screen…';
-  run(label, () => window.sobes.askScreen({ text, label }));
+  const heard = window.audio?.dialoguePrefix?.() || '';
+  const body = heard
+    ? `${heard}\n\n${text || 'Find the one question on the screen and answer it using the conversation above.'}`
+    : text;
+  run(label, () => window.sobes.askScreen({ text: body, label, dialogue: !!heard }));
 }
 
 function clearAll() {
   output.innerHTML = hintHTML;
   setStatus('');
+  window.audio?.clearConversation?.();
 }
 
 // ---------- Answer mode ----------
@@ -442,7 +451,9 @@ const SOURCE_NAMES = { system: 'System audio', mic: 'Microphone', both: 'System 
 function showSource(src) {
   if (!SOURCE_LABELS[src]) return;
   $('btn-source').textContent = SOURCE_LABELS[src];
-  $('btn-source').title = `Audio source: ${SOURCE_NAMES[src]}. Your mic is never used.`;
+  $('btn-source').title = src === 'both'
+    ? 'Listening to the interviewer (laptop audio) and you (microphone). Use headphones.'
+    : 'Microphone is off. Only the interviewer is heard.';
 }
 
 async function cycleSource() {
@@ -474,7 +485,8 @@ function micTexts({ mode, phase, source }) {
     return [phase === 'speech' ? 'Recording · hearing sound' : 'Recording', `${src} · press ⌘⇧R to stop and answer`];
   if (mode === 'live') {
     const label = phase === 'transcribing' ? 'Listening · transcribing…' : phase === 'speech' ? 'Listening · hearing speech' : 'Listening';
-    return [label, `${src} · auto-answers questions · ⌘⇧L to stop`];
+    const via = source === 'both' ? 'Interviewer and you · use headphones' : 'Interviewer only · microphone is off';
+    return [label, `${via} · ⌘⇧L to stop`];
   }
   if (phase === 'transcribing') return ['Transcribing…', 'Turning speech into text'];
   return ['Not listening', '⌘⇧L live listen · ⌘⇧R record'];
