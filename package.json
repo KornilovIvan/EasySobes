@@ -1,0 +1,109 @@
+{
+  "name": "easysobes",
+  "version": "2.0.2",
+  "description": "Free AI interview helper: an always-on-top overlay that is hidden from screen shares. Bring your own free Groq key. macOS and Windows.",
+  "main": "src/main.js",
+  "bin": {
+    "sobes": "bin/sobes.js",
+    "easysobes": "bin/sobes.js"
+  },
+  "files": [
+    "bin/",
+    "src/"
+  ],
+  "scripts": {
+    "start": "electron .",
+    "setup": "node bin/sobes.js setup",
+    "pack": "node scripts/build.js --dir",
+    "dist": "node scripts/build.js --mac",
+    "dist:win": "node scripts/build.js --win"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KornilovIvan/EasySobes.git"
+  },
+  "homepage": "https://github.com/KornilovIvan/EasySobes#readme",
+  "bugs": {
+    "url": "https://github.com/KornilovIvan/EasySobes/issues"
+  },
+  "keywords": [
+    "electron",
+    "ai",
+    "interview",
+    "overlay",
+    "groq",
+    "whisper"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "electron": "^44.4.3",
+    "unpdf": "^1.8.1"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.easysobes.assistant",
+    "productName": "EasySobes",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "EasySobes listens to your microphone to transcribe questions and answer them.",
+        "NSScreenCaptureUsageDescription": "EasySobes reads your screen to answer questions about what is shown.",
+        "NSAudioCaptureUsageDescription": "EasySobes captures system audio to transcribe the other side of a call.",
+        "LSUIElement": true
+      }
+    },
+    "dmg": {
+      "sign": false
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
+  }
+}
