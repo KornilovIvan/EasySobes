@@ -1,8 +1,4 @@
 # EasySobes
-
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-![platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)
-
 A free, open-source AI helper for interviews and meetings. It floats on top of your screen,
 listens to the interviewer and to you, and shows a short answer you can say out loud.
 It is left out of screen shares and screenshots, so only you see it.
@@ -112,7 +108,7 @@ If you use VS Code's terminal, VS Code needs the permission, and VS Code must be
 On Windows, allow the microphone if Windows asks. Hiding from screen shares needs Windows 10 version 2004 or newer.
 
 ## Good to know
-- EasySobes hears the call (everything your computer plays) and your microphone. The interviewer's questions and your own answers stay in one conversation, so the next suggestion follows what was already said. A suggestion appears when the interviewer asks something, or when you ask a clarifying question. Use headphones, otherwise the microphone also hears the call from the speakers.
+- Use headphones. EasySobes is meant to be used that way: the call comes from the computer's audio, and your voice comes from the microphone. Both stay in one conversation, so the next suggestion follows what was already said. A suggestion appears when the interviewer asks something, or when you ask a clarifying question.
 - Always test in the app you share from (Zoom, Meet, Teams) before a real call. Whether a window stays hidden depends on how that app captures the screen.
 - Groq's free tier allows about 7,000 input tokens per minute. Screen questions use the most. If you hit the limit, EasySobes waits and retries by itself.
 - Your settings file: `~/Library/Application Support/easysobes/settings.json` (macOS) or `%APPDATA%\easysobes\settings.json` (Windows). The log file `easysobes.log` is in the same folder.

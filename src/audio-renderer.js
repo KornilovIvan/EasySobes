@@ -673,7 +673,14 @@
         diag(`${item.role} "${transcript.slice(0, 180)}" → ${action}`);
         if (action === 'drop') continue;
         remember(item.role, transcript);
-        if (action === 'answer') {
+        // The interviewer's question still gets a suggestion when your line is already
+        // queued. Your words stay in the log and are part of that suggestion.
+        if (action === 'answer' && item.role === 'interviewer') {
+          if (deferred) showTranscript(deferred.role, deferred.transcript);
+          deferred = { role: item.role, transcript };
+        } else if (deferred && deferred.role === 'interviewer') {
+          showTranscript(item.role, transcript);
+        } else if (action === 'answer') {
           showDeferred();
           deferred = { role: item.role, transcript };
         } else {
