@@ -14,6 +14,7 @@ const SETTING_KEYS = [
   'sttModel',
   'language',
   'context',
+  'contextLimit',
 ];
 // Hotkey labels are written Mac-style (⌘⇧R). On Windows/Linux, rewrite every label to Ctrl+Shift+R,
 // including text that other modules set later.
@@ -211,6 +212,8 @@ function scrollToEnd(force = false) {
   if (stickToBottom) output.scrollTop = output.scrollHeight;
 }
 
+let restoring = false;
+
 function addMessage(cls, html) {
   if (cls.includes('error')) {
     try { window.sobes.send('log', `shown error: ${String(html).slice(0, 400)}`); } catch {}
@@ -221,6 +224,7 @@ function addMessage(cls, html) {
   el.innerHTML = html;
   output.appendChild(el);
   scrollToEnd(true);
+  if (!restoring && (cls.includes('user') || cls.includes('error'))) rememberVisible(cls.includes('error') ? 'error' : 'user', el.textContent);
   return el;
 }
 
@@ -228,6 +232,7 @@ const rawAnswers = new WeakMap(); // bot message element -> raw markdown
 
 function finalizeBot(msg, text) {
   rawAnswers.set(msg, text);
+  if (!restoring) rememberVisible('bot', text);
   const btn = document.createElement('button');
   btn.className = 'copy-btn copy-msg';
   btn.title = 'Copy answer (markdown)';
@@ -341,7 +346,258 @@ function askScreen() {
 function clearAll() {
   output.innerHTML = hintHTML;
   setStatus('');
+  if (activeChat) {
+    activeChat.messages = [];
+    activeChat.turns = [];
+    activeChat.summary = '';
+    activeChat.context = '';
+    activeChat.title = 'New chat';
+    activeChat.updatedAt = Date.now();
+    renderChatList();
+  }
   window.audio?.clearConversation?.();
+}
+
+// ---------- Chats (one history and one spoken memory each) ----------
+
+let chats = [];
+let activeChat = null;
+let chatSaveTimer = 0;
+let pendingDelete = null;
+let pendingRename = null;
+
+function blankChat() {
+  return {
+    id: `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    title: 'New chat',
+    updatedAt: Date.now(),
+    messages: [],
+    turns: [],
+    summary: '',
+    context: '',
+  };
+}
+
+function titleFrom(text) {
+  const clean = String(text || '').replace(/^[🎧🎤🖥]\s*/, '').replace(/\s+/g, ' ').trim();
+  if (!clean || clean === 'Reading screen…') return '';
+  return clean.length > 42 ? `${clean.slice(0, 42)}…` : clean;
+}
+
+function rememberVisible(kind, text) {
+  if (!activeChat) return;
+  activeChat.messages.push({ kind, text: String(text || '').slice(0, 16000) });
+  if (activeChat.messages.length > 250) activeChat.messages.splice(0, activeChat.messages.length - 250);
+  const title = kind === 'user' ? titleFrom(text) : '';
+  if (title && activeChat.title === 'New chat') activeChat.title = title;
+  activeChat.updatedAt = Date.now();
+  renderChatList();
+  persistSoon();
+}
+
+function snapshotMemory() {
+  const mem = window.audio?.getMemory?.();
+  if (!activeChat || !mem) return;
+  activeChat.turns = mem.turns;
+  activeChat.summary = mem.summary;
+}
+
+function persistSoon() {
+  clearTimeout(chatSaveTimer);
+  chatSaveTimer = setTimeout(saveChats, 250);
+}
+
+function saveChats() {
+  snapshotMemory();
+  if (!activeChat) return;
+  window.sobes.invoke('chats-save', { activeId: activeChat.id, chats }).catch(() => {});
+}
+
+let contextChatId = '';
+let contextCharLimit = 16000;
+
+function setContextCharLimit(n) {
+  const value = Math.round(Number(n));
+  contextCharLimit = Number.isFinite(value) ? Math.min(4000000, Math.max(500, value)) : 16000;
+  const field = $('context-text');
+  if (field) field.maxLength = contextCharLimit;
+}
+
+function syncContextButton() {
+  const btn = $('btn-chat-context');
+  if (!btn) return;
+  btn.classList.toggle('on', !!String(activeChat?.context || '').trim());
+}
+
+function renderContextCount() {
+  const field = $('context-text');
+  const max = contextCharLimit;
+  const n = field.value.length;
+  const el = $('context-count');
+  el.textContent = `${n.toLocaleString('en-US')} / ${max.toLocaleString('en-US')}`;
+  el.classList.toggle('long', n > 4000);
+}
+
+function openContext(id) {
+  const chat = chats.find((c) => c.id === id) || activeChat;
+  if (!chat) return;
+  contextChatId = chat.id;
+  $('context-title').textContent = chat.title && chat.title !== 'New chat' ? chat.title : 'Context for this chat';
+  const field = $('context-text');
+  field.maxLength = contextCharLimit;
+  field.value = String(chat.context || '').slice(0, contextCharLimit);
+  renderContextCount();
+  $('context-modal').classList.remove('hidden');
+  $('context-text').focus();
+}
+
+function closeContext() {
+  contextChatId = '';
+  $('context-modal').classList.add('hidden');
+}
+
+function saveContext(e) {
+  if (e) e.preventDefault();
+  const chat = chats.find((c) => c.id === contextChatId);
+  if (!chat) return closeContext();
+  chat.context = $('context-text').value.trim().slice(0, contextCharLimit);
+  chat.updatedAt = Date.now();
+  closeContext();
+  renderChatList();
+  persistSoon();
+  setStatus(chat.context ? 'Context saved for this chat' : 'Context cleared');
+}
+
+function renderChatList() {
+  hideChatTip();
+  const list = $('chat-list');
+  if (!list) return;
+  const sorted = chats.slice().sort((a, b) => b.updatedAt - a.updatedAt);
+  let html = '';
+  for (const chat of sorted) {
+    const on = chat.id === activeChat?.id ? ' active' : '';
+    const id = escapeHtml(chat.id);
+    if (chat.id === pendingDelete) {
+      html += `<div class="chat-row confirm${on}" data-id="${id}">` +
+        `<span class="chat-ask">Delete?</span>` +
+        `<button type="button" class="chat-del-yes">Delete</button>` +
+        `<button type="button" class="chat-del-no">Cancel</button></div>`;
+    } else if (chat.id === pendingRename) {
+      html += `<div class="chat-row${on}" data-id="${id}">` +
+        `<input class="chat-rename" maxlength="80" value="${escapeHtml(chat.title || 'New chat')}" /></div>`;
+    } else {
+      html += `<div class="chat-row${on}" data-id="${id}">` +
+        `<button type="button" class="chat-open">${escapeHtml(chat.title || 'New chat')}</button>` +
+        `<button type="button" class="chat-rename-btn" aria-label="Rename">✎</button>` +
+        `<button type="button" class="chat-del" aria-label="Delete">×</button></div>`;
+    }
+  }
+  list.innerHTML = html;
+  syncContextButton();
+  const field = list.querySelector('.chat-rename');
+  if (!field) return;
+  const rowId = field.closest('.chat-row').dataset.id;
+  field.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      field.dataset.save = '1';
+      field.blur();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      field.dataset.save = '0';
+      field.blur();
+    }
+  });
+  field.addEventListener('blur', () => {
+    if (pendingRename !== rowId) return;
+    const save = field.dataset.save !== '0';
+    pendingRename = null;
+    if (save) {
+      const chat = chats.find((c) => c.id === rowId);
+      const title = field.value.replace(/\s+/g, ' ').trim().slice(0, 80);
+      if (chat && title) {
+        chat.title = title;
+        persistSoon();
+      }
+    }
+    renderChatList();
+  });
+  field.focus();
+  field.select();
+}
+
+function paintChat(chat) {
+  restoring = true;
+  output.innerHTML = '';
+  if (!chat.messages.length) output.innerHTML = hintHTML;
+  for (const m of chat.messages) {
+    if (m.kind === 'bot') {
+      const el = addMessage('bot', `<div class="md">${renderMarkdown(m.text)}</div>`);
+      finalizeBot(el, m.text);
+    } else if (m.kind === 'error') addMessage('error', escapeHtml(m.text));
+    else addMessage('user', escapeHtml(m.text));
+  }
+  restoring = false;
+  scrollToEnd(true);
+}
+
+function openChat(id) {
+  if (busy) return setStatus('Wait for the answer to finish');
+  const next = chats.find((c) => c.id === id);
+  if (!next || next === activeChat) return;
+  snapshotMemory();
+  activeChat = next;
+  window.audio?.setMemory?.({ turns: next.turns, summary: next.summary });
+  paintChat(next);
+  renderChatList();
+  persistSoon();
+}
+
+function newChat() {
+  if (busy) return setStatus('Wait for the answer to finish');
+  snapshotMemory();
+  if (activeChat && activeChat.title === 'New chat' && !activeChat.messages.length && !(activeChat.turns || []).length && !String(activeChat.context || '').trim()) return;
+  const chat = blankChat();
+  chats.unshift(chat);
+  activeChat = chat;
+  window.audio?.setMemory?.({ turns: [], summary: '' });
+  paintChat(chat);
+  renderChatList();
+  persistSoon();
+}
+
+function deleteChat(id) {
+  if (busy && id === activeChat?.id) return setStatus('Wait for the answer to finish');
+  const index = chats.findIndex((c) => c.id === id);
+  if (index < 0) return;
+  const wasActive = chats[index] === activeChat;
+  chats.splice(index, 1);
+  if (!chats.length) chats.push(blankChat());
+  if (wasActive) {
+    activeChat = chats[Math.min(index, chats.length - 1)];
+    window.audio?.setMemory?.({ turns: activeChat.turns, summary: activeChat.summary });
+    paintChat(activeChat);
+  }
+  renderChatList();
+  persistSoon();
+}
+
+function setChatsOpen(open) {
+  $('panel').dataset.chats = open ? 'open' : 'closed';
+  try { localStorage.setItem('chatsOpen', open ? 'open' : 'closed'); } catch {}
+}
+
+async function initChats() {
+  let saved = { activeId: '', chats: [] };
+  try { saved = await window.sobes.invoke('chats-load'); } catch {}
+  chats = Array.isArray(saved.chats) && saved.chats.length ? saved.chats : [blankChat()];
+  activeChat = chats.find((c) => c.id === saved.activeId) || chats[0];
+  window.audio?.setMemory?.({ turns: activeChat.turns || [], summary: activeChat.summary || '' });
+  paintChat(activeChat);
+  renderChatList();
+  let open = true;
+  try { open = localStorage.getItem('chatsOpen') !== 'closed'; } catch {}
+  setChatsOpen(open);
 }
 
 // ---------- Font size (per-device, localStorage) ----------
@@ -503,7 +759,8 @@ function applyTheme(theme) {
 async function saveSettings() {
   const settings = {};
   SETTING_KEYS.forEach((k) => (settings[k] = $(`s-${k}`).value.trim()));
-  await window.sobes.saveSettings(settings);
+  const saved = await window.sobes.saveSettings(settings);
+  setContextCharLimit(saved?.contextLimit);
   try {
     window.audio?.setSource?.($('s-source').value);
   } catch {}
@@ -523,6 +780,20 @@ input.addEventListener('keydown', (e) => {
 });
 
 $('s-theme').onchange = () => applyTheme($('s-theme').value);
+$('btn-chat-context').onclick = () => openContext(activeChat?.id);
+$('context-form').onsubmit = saveContext;
+$('context-cancel').onclick = closeContext;
+$('context-close').onclick = closeContext;
+$('context-modal').onclick = (e) => {
+  if (e.target === $('context-modal')) closeContext();
+};
+$('context-text').addEventListener('input', renderContextCount);
+$('context-text').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeContext();
+  }
+});
 $('btn-live').onclick = toggleLive;
 $('btn-screen').onclick = () => askScreen();
 $('btn-settings').onclick = openSettings;
@@ -541,6 +812,82 @@ $('btn-resume').onclick = async () => {
 };
 $('btn-check-hidden').onclick = checkHidden;
 $('btn-hide').onclick = () => window.sobes.hide();
+$('btn-chat-new').onclick = newChat;
+$('btn-chats-hide').onclick = () => setChatsOpen(false);
+$('btn-chats-show').onclick = () => setChatsOpen(true);
+let chatTipTimer = 0;
+let chatTip = null;
+
+function hideChatTip() {
+  clearTimeout(chatTipTimer);
+  chatTip?.remove();
+  chatTip = null;
+}
+
+function showChatTip(btn) {
+  hideChatTip();
+  const text = btn.getAttribute('aria-label');
+  if (!text) return;
+  const tip = document.createElement('div');
+  tip.className = 'hover-tip';
+  tip.textContent = text;
+  document.body.appendChild(tip);
+  const rect = btn.getBoundingClientRect();
+  tip.style.left = `${rect.left + rect.width / 2}px`;
+  tip.style.top = `${rect.bottom + 6}px`;
+  chatTip = tip;
+}
+
+$('chat-list').addEventListener('mouseover', (e) => {
+  const btn = e.target.closest('.chat-rename-btn, .chat-del');
+  if (!btn || btn.contains(e.relatedTarget)) return;
+  clearTimeout(chatTipTimer);
+  chatTipTimer = setTimeout(() => showChatTip(btn), 600);
+});
+$('chat-list').addEventListener('mouseout', (e) => {
+  const btn = e.target.closest('.chat-rename-btn, .chat-del');
+  if (!btn || btn.contains(e.relatedTarget)) return;
+  hideChatTip();
+});
+
+$('chat-list').onclick = (e) => {
+  const row = e.target.closest('.chat-row');
+  if (!row) return;
+  if (e.target.closest('.chat-del-yes')) {
+    const id = row.dataset.id;
+    pendingDelete = null;
+    deleteChat(id);
+    return;
+  }
+  if (e.target.closest('.chat-del-no')) {
+    pendingDelete = null;
+    renderChatList();
+    return;
+  }
+  if (e.target.closest('.chat-del')) {
+    pendingRename = null;
+    pendingDelete = row.dataset.id;
+    renderChatList();
+    return;
+  }
+  if (e.target.closest('.chat-rename-btn')) {
+    pendingDelete = null;
+    pendingRename = row.dataset.id;
+    renderChatList();
+    return;
+  }
+  if (e.target.closest('.chat-rename')) return;
+  pendingDelete = null;
+  pendingRename = null;
+  openChat(row.dataset.id);
+};
+$('chat-list').ondblclick = (e) => {
+  const open = e.target.closest('.chat-open');
+  if (!open) return;
+  pendingDelete = null;
+  pendingRename = open.closest('.chat-row').dataset.id;
+  renderChatList();
+};
 
 window.sobes.on('hotkey-record', () => window.audio.toggleRecording());
 window.sobes.on('hotkey-screen', askScreen);
@@ -548,17 +895,28 @@ window.sobes.on('hotkey-clear', clearAll);
 window.sobes.on('hotkey-focus', () => input.focus());
 
 // audio-renderer.js loads after this file, so read the source once everything is parsed.
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   if (window.audio?.getState) renderMic(window.audio.getState());
-});
-window.sobes.getSettings()
-  .then((s) => {
+  await initChats();
+  try {
+    const s = await window.sobes.getSettings();
+    setContextCharLimit(s.contextLimit);
     if (!s.textApiKey && !s.speechApiKey) {
       addMessage('error', 'No API key yet. Open Settings and paste a key for speech and for text, then click Save.');
       openSettings();
     }
-  })
-  .catch(() => {});
+  } catch {}
+});
 
 // Shared helpers for feature modules (audio-renderer.js etc.).
-window.app = { $, run, addMessage, setStatus, escapeHtml, isBusy: () => busy };
+window.app = {
+  $,
+  run,
+  addMessage,
+  setStatus,
+  escapeHtml,
+  isBusy: () => busy,
+  onMemoryChanged: persistSoon,
+  chatContext: () => String(activeChat?.context || ''),
+  contextLimit: () => contextCharLimit,
+};

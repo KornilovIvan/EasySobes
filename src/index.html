@@ -8,8 +8,28 @@
   <script src="theme.js"></script>
 </head>
 <body>
-  <div class="panel">
+  <div class="panel" id="panel" data-chats="open">
+    <div class="shell">
+      <aside id="chats" class="chats no-drag">
+        <div class="chats-bar">
+          <button id="btn-chats-hide" type="button" title="Hide chats" aria-label="Hide chats">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+              <path d="M9 4v16" fill="none" stroke="currentColor" stroke-width="1.7"/>
+            </svg>
+          </button>
+        </div>
+        <button id="btn-chat-new" type="button" class="chat-new"><span class="chat-plus">+</span> New chat</button>
+        <div id="chat-list" class="chat-list"></div>
+      </aside>
+      <div class="workspace">
     <header class="drag">
+      <button id="btn-chats-show" type="button" class="chats-show no-drag" title="Show chats" aria-label="Show chats">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/>
+          <path d="M9 4v16" fill="none" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+      </button>
       <div id="micbar" class="micbar" data-mode="off" data-phase="idle" title="Listening status">
         <span class="mic-dot"></span>
         <span class="mic-text">
@@ -50,6 +70,10 @@
       <label>API base URL <input id="s-textBaseUrl" placeholder="https://api.deepseek.com" /></label>
       <label>API key <input id="s-textApiKey" type="password" placeholder="sk-..." /></label>
       <label>Chat model <input id="s-chatModel" placeholder="deepseek-flash" /></label>
+      <label>Context limit per chat
+        <input id="s-contextLimit" inputmode="numeric" placeholder="16000" />
+      </label>
+      <p class="settings-note">Characters each chat can keep. On the model page, take the window in tokens and multiply by 2 for Russian, or by 4 for English. Leave some of that for the answer. Under 4,000 characters stays fast.</p>
       <h3 class="settings-group">Images</h3>
       <label>API base URL <input id="s-visionBaseUrl" placeholder="https://api.deepseek.com" /></label>
       <label>API key <input id="s-visionApiKey" type="password" placeholder="sk-..." /></label>
@@ -92,7 +116,7 @@
           <dt><kbd>⌘⇧R</kbd></dt><dd>Record once, then answer</dd>
           <dt><kbd>⌘⇧↩</kbd></dt><dd>Read the screen and answer</dd>
           <dt><kbd>⌘⇧I</kbd></dt><dd>Type a question</dd>
-          <dt><kbd>⌘⇧K</kbd></dt><dd>Clear the screen</dd>
+          <dt><kbd>⌘⇧K</kbd></dt><dd>Clear this chat</dd>
           <dt><kbd>⌘⇧T</kbd></dt><dd>Click-through · <kbd>⌘⇧O</kbd> <kbd>⌘⇧P</kbd> opacity</dd>
           <dt><kbd>⌘⇧Space</kbd></dt><dd>Show / hide · <kbd>⌘⇧Q</kbd> quit</dd>
         </dl>
@@ -102,8 +126,28 @@
     <footer class="no-drag">
       <button id="btn-live" class="ctl" title="Live listen, auto-answer (⌘⇧L)"><span class="ic">◉</span><span class="lbl">Live</span></button>
       <button id="btn-screen" class="ctl" title="Send the screen (⌘⇧Enter)"><span class="ic">🖥</span><span class="lbl">Send screen</span></button>
+      <button id="btn-chat-context" class="ctl" type="button" title="Context for this chat">Context</button>
       <input id="input" placeholder="Ask anything…" />
     </footer>
+      </div>
+    </div>
+    <div id="context-modal" class="context-modal hidden no-drag">
+      <form id="context-form" class="context-card">
+        <div class="context-head">
+          <span id="context-title">Context for this chat</span>
+          <button id="context-close" type="button" aria-label="Close">×</button>
+        </div>
+        <textarea id="context-text" maxlength="16000" placeholder="Role, stack, what you already told them…"></textarea>
+        <div class="context-meta">
+          <p class="context-note">Saved for this chat only. Later answers rely on it. Under 4,000 characters keeps replies quick.</p>
+          <span id="context-count" class="context-count">0 / 16,000</span>
+        </div>
+        <div class="context-actions">
+          <button id="context-cancel" type="button">Cancel</button>
+          <button id="context-save" class="primary" type="submit">Save</button>
+        </div>
+      </form>
+    </div>
   </div>
   <script src="renderer.js"></script>
   <script src="audio-renderer.js"></script>

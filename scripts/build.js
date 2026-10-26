@@ -1,8 +1,8 @@
 // Runs electron-builder with the given arguments (npm run pack / dist / dist:win).
 //
-// Electron is in "dependencies" so `npm install -g easysobes` gets it, but electron-builder
-// refuses to build unless it is in "devDependencies". So this moves it there for the build only,
-// then always puts package.json back exactly as it was.
+// Electron stays in "dependencies" so `npm install` and the one-line installers can start the app.
+// electron-builder refuses to build unless it is in "devDependencies", so this moves it there
+// for the build only, then always puts package.json back exactly as it was.
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');

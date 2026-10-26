@@ -37,11 +37,18 @@ const DEFAULT_SETTINGS = {
   visionModel: 'qwen/qwen3.8-27b',
   sttModel: 'whisper-large-v3-turbo',
   context: '',
+  contextLimit: 16000,
   language: 'auto', // auto | en | ru | hi | hinglish — what the other people speak
 };
 
 // Earlier builds stored this as the chat model. Text now goes to gpt-oss; vision stays on Qwen.
 const PREVIOUS_CHAT_MODEL = 'qwen/qwen3.8-27b';
+
+function contextLimitOf(settings) {
+  const n = Math.round(Number(settings && settings.contextLimit));
+  if (!Number.isFinite(n)) return DEFAULT_SETTINGS.contextLimit;
+  return Math.min(4000000, Math.max(500, n));
+}
 
 function isGroqUrl(url) {
   return /api\.groq\.com/i.test(String(url || ''));
@@ -95,6 +102,7 @@ function loadSettings() {
       delete merged.expandedHeight;
       dirty = true;
     }
+    merged.contextLimit = contextLimitOf(merged);
     if (dirty) {
       try {
         fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
@@ -112,6 +120,7 @@ function loadSettings() {
 // Always merges into the file on disk: a partial patch can never drop other keys (e.g. the API key).
 function saveSettings(patch) {
   const merged = { ...loadSettings(), ...patch };
+  merged.contextLimit = contextLimitOf(merged);
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
   const tmp = `${SETTINGS_FILE}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(merged, null, 2));
@@ -128,9 +137,9 @@ function logLine(msg) {
 function createWindow() {
   const { width } = screen.getPrimaryDisplay().workAreaSize;
   win = new BrowserWindow({
-    width: 600,
-    height: 400,
-    x: width - 620,
+    width: 780,
+    height: 460,
+    x: width - 800,
     y: 40,
     frame: false,
     transparent: true,
@@ -582,6 +591,52 @@ function readAsk(payload) {
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) return String(payload.text || '');
   return String(payload || '');
 }
+
+const CHATS_FILE = path.join(app.getPath('userData'), 'chats.json');
+
+function cleanChat(raw) {
+  const messages = Array.isArray(raw?.messages) ? raw.messages : [];
+  const turns = Array.isArray(raw?.turns) ? raw.turns : [];
+  return {
+    id: String(raw?.id || '').slice(0, 40),
+    title: String(raw?.title || 'New chat').slice(0, 80) || 'New chat',
+    updatedAt: Number(raw?.updatedAt) || Date.now(),
+    summary: String(raw?.summary || '').slice(0, 4000),
+    messages: messages.slice(-250).map((m) => ({
+      kind: m?.kind === 'bot' || m?.kind === 'error' ? m.kind : 'user',
+      text: String(m?.text || '').slice(0, 16000),
+    })),
+    turns: turns.slice(-40).map((t) => ({
+      role: t?.role === 'me' ? 'me' : 'interviewer',
+      text: String(t?.text || '').slice(0, 2000),
+    })),
+    context: String(raw?.context || '').slice(0, contextLimitOf(currentSettings())),
+  };
+}
+
+function loadChats() {
+  try {
+    const data = JSON.parse(fs.readFileSync(CHATS_FILE, 'utf8'));
+    const chats = (Array.isArray(data?.chats) ? data.chats : []).map(cleanChat).filter((c) => c.id);
+    return { activeId: String(data?.activeId || ''), chats: chats.slice(0, 60) };
+  } catch {
+    return { activeId: '', chats: [] };
+  }
+}
+
+function saveChats(data) {
+  const chats = (Array.isArray(data?.chats) ? data.chats : []).map(cleanChat).filter((c) => c.id).slice(0, 60);
+  const activeId = String(data?.activeId || '');
+  const payload = { activeId: chats.some((c) => c.id === activeId) ? activeId : chats[0]?.id || '', chats };
+  fs.mkdirSync(path.dirname(CHATS_FILE), { recursive: true });
+  const tmp = `${CHATS_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(payload));
+  fs.renameSync(tmp, CHATS_FILE);
+  return payload;
+}
+
+ipcMain.handle('chats-load', () => loadChats());
+ipcMain.handle('chats-save', (_e, data) => saveChats(data));
 
 ipcMain.handle('get-settings', () => currentSettings());
 ipcMain.handle('save-settings', (_e, settings) => saveSettings(settings));

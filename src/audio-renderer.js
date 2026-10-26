@@ -275,6 +275,30 @@
     conversation.turns = [];
     conversation.summary = '';
     summarizing = false;
+    publishMemory();
+  }
+
+  function getMemory() {
+    return {
+      turns: conversation.turns.map((t) => ({ role: t.role, text: t.text })),
+      summary: conversation.summary,
+    };
+  }
+
+  // Switching chats replaces the live memory. A summary still in flight belongs to the previous chat.
+  function setMemory(mem) {
+    generation++;
+    summarizing = false;
+    conversation.turns = Array.isArray(mem?.turns)
+      ? mem.turns.map((t) => ({ role: t.role === 'me' ? 'me' : 'interviewer', text: String(t.text || '') }))
+      : [];
+    conversation.summary = String(mem?.summary || '');
+  }
+
+  function publishMemory() {
+    try {
+      window.app?.onMemoryChanged?.();
+    } catch {}
   }
 
   function remember(role, text) {
@@ -283,6 +307,7 @@
     const last = conversation.turns[conversation.turns.length - 1];
     if (last && last.role === role && last.text === line) return;
     conversation.turns.push({ role, text: line });
+    publishMemory();
     maybeSummarize();
   }
 
@@ -299,8 +324,29 @@
     return role === 'me' ? 'Candidate' : 'Interviewer';
   }
 
+  function contextBlock() {
+    let body = '';
+    try {
+      body = String(window.app?.chatContext?.() || '').trim();
+    } catch {}
+    if (!body) return '';
+    let max = 16000;
+    try {
+      const n = Number(window.app?.contextLimit?.());
+      if (Number.isFinite(n) && n >= 500) max = n;
+    } catch {}
+    if (body.length > max) body = body.slice(0, max);
+    return (
+      'Background the candidate added for this chat:\n' +
+      body +
+      '\n\nRely on this background in every answer. Do not contradict it.'
+    );
+  }
+
   function dialogueText(role) {
     const lines = [];
+    const context = contextBlock();
+    if (context) lines.push(context);
     if (conversation.summary) lines.push(`Earlier in this interview:\n${conversation.summary}`);
     const turns = turnsForModel();
     if (turns.length) {
@@ -328,9 +374,11 @@
   // For typed questions and screen asks: the transcript without a "who just spoke" instruction.
   function dialoguePrefix() {
     const lines = [];
+    const context = contextBlock();
+    if (context) lines.push(context);
     if (conversation.summary) lines.push(`Earlier in this interview:\n${conversation.summary}`);
     const turns = turnsForModel();
-    if (!conversation.summary && !turns.length) return '';
+    if (!context && !conversation.summary && !turns.length) return '';
     if (turns.length) {
       lines.push('Conversation so far:');
       for (const t of turns) lines.push(`${who(t.role)}: ${t.text}`);
@@ -356,6 +404,7 @@
         if (!text) throw new Error('empty summary');
         conversation.summary = text;
         conversation.turns.splice(0, end);
+        publishMemory();
       })
       .catch((err) => {
         summaryFailedAt = Date.now();
@@ -779,6 +828,8 @@
     getSource,
     setSource,
     clearConversation,
+    getMemory,
+    setMemory,
     dialoguePrefix,
   };
 })();

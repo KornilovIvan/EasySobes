@@ -12,11 +12,10 @@ It is left out of screen shares and screenshots, so only you see it.
 
 ## Install
 
-Pick **one** of these. All three give you the same `sobes` command.
+Pick **one** of these. Both give you the same `sobes` command.
 
 | Your computer | Command |
 |---|---|
-| **Any system with Node.js 20+** | `npm install -g easysobes` |
 | **macOS** (no Node.js needed) | `curl -fsSL https://raw.githubusercontent.com/KornilovIvan/EasySobes/main/install.sh \| bash` |
 | **Windows 10/11** (no Node.js needed) | `irm https://raw.githubusercontent.com/KornilovIvan/EasySobes/main/install.ps1 \| iex` |
 
@@ -25,31 +24,19 @@ Then type:
 sobes
 ```
 
-### Option 1: npm
-If you already have [Node.js](https://nodejs.org) 20 or newer (check with `node -v`), this works on macOS and Windows:
-```bash
-npm install -g easysobes
-sobes
-```
-The first `sobes` downloads Electron (about 100 MB) and runs the setup wizard.
-If another tool already owns the `sobes` command, use `easysobes` instead. It does the same thing.
-
-> On macOS, if npm says `EACCES` (permission denied), don't use `sudo`. Use Option 2 instead,
-> or install Node.js with [nvm](https://github.com/nvm-sh/nvm).
-
-### Option 2: macOS one-line installer
+### macOS
 Open Terminal and paste:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/KornilovIvan/EasySobes/main/install.sh | bash
 ```
 
-### Option 3: Windows one-line installer
+### Windows
 Open PowerShell and paste:
 ```powershell
 irm https://raw.githubusercontent.com/KornilovIvan/EasySobes/main/install.ps1 | iex
 ```
 
-Options 2 and 3 need nothing installed first. They download Node.js by themselves when you don't have it.
+Neither installer needs anything installed first. Each downloads Node.js by itself when you don't have it.
 
 Want to remove EasySobes later? See [Uninstall](#uninstall).
 
@@ -123,7 +110,7 @@ You need [Node.js 20+](https://nodejs.org) and git.
 git clone https://github.com/KornilovIvan/EasySobes.git
 cd EasySobes
 npm install
-npm start          # or: npm link, then type sobes anywhere
+npm start
 ```
 Without the wizard, click ⚙ in the overlay, paste your key, click **📄 Load resume**, and click Save.
 You can also run the wizard with `npm run setup`.
@@ -163,14 +150,8 @@ Remove-Item -Recurse -Force "$env:APPDATA\easysobes" -ErrorAction SilentlyContin
 ```
 The first line removes EasySobes, the next two remove the `sobes` command from your PATH, and the last deletes your settings.
 
-### Installed with npm (any system)
-```bash
-npm uninstall -g easysobes
-```
-Then delete your settings: on macOS `rm -rf ~/Library/Application\ Support/easysobes`, on Windows (PowerShell) `Remove-Item -Recurse -Force "$env:APPDATA\easysobes"`.
-
 ### Installed with git clone
-Delete the `sobes` folder you cloned. If you ran `npm link`, run `npm unlink -g easysobes` first. Then delete your settings as shown above.
+Delete the folder you cloned. Then delete your settings as shown above.
 
 ### Optional: remove the macOS permission
 System Settings → Privacy & Security → Screen & System Audio Recording → select your terminal app and click **−**.
