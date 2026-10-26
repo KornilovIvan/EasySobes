@@ -5,6 +5,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:" />
   <title>EasySobes</title>
   <link rel="stylesheet" href="styles.css" />
+  <script src="theme.js"></script>
 </head>
 <body>
   <div class="panel">
@@ -20,7 +21,12 @@
       </div>
       <span id="stealth-ind" class="stealth-ind hidden" title="Stealth status"></span>
       <div class="actions no-drag">
-        <button id="btn-settings" title="Settings">⚙</button>
+        <button id="btn-settings" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
         <button id="btn-hide" title="Hide (⌘⇧Space)">—</button>
       </div>
     </header>
@@ -30,6 +36,12 @@
         <button id="btn-settings-back" type="button">← Back to chat</button>
       </div>
       <p class="settings-note">Speech, text and images each use their own server. A blank field keeps the shared Groq URL and key.</p>
+      <label>Appearance
+        <select id="s-theme">
+          <option value="dark">Black</option>
+          <option value="light">White</option>
+        </select>
+      </label>
       <h3 class="settings-group">Speech</h3>
       <label>API base URL <input id="s-speechBaseUrl" placeholder="https://api.groq.com/openai/v1" /></label>
       <label>API key <input id="s-speechApiKey" type="password" placeholder="gsk_... (console.groq.com)" /></label>
@@ -89,7 +101,7 @@
 
     <footer class="no-drag">
       <button id="btn-live" class="ctl" title="Live listen, auto-answer (⌘⇧L)"><span class="ic">◉</span><span class="lbl">Live</span></button>
-      <button id="btn-screen" class="ctl" title="Read screen (⌘⇧Enter)"><span class="ic">🖥</span></button>
+      <button id="btn-screen" class="ctl" title="Send the screen (⌘⇧Enter)"><span class="ic">🖥</span><span class="lbl">Send screen</span></button>
       <input id="input" placeholder="Ask anything…" />
     </footer>
   </div>

@@ -33,45 +33,84 @@
 }
 
 /* ---------- Tokens ----------
-   A cool, near-black glass with one calm accent (periwinkle blue).
-   Every text color passes WCAG AA on the panel even when a white window sits behind it. */
+   Black and white for the window. Saturated colors are only for signals:
+   live, speech, recording, transcribing, and errors. */
 :root {
   /* surfaces */
-  --bg: rgba(13, 15, 20, 0.9);            /* #0d0f14 glass */
+  --bg: rgba(8, 8, 8, 0.94);
   --surface: rgba(255, 255, 255, 0.04);
-  --surface-2: rgba(255, 255, 255, 0.075);
+  --surface-2: rgba(255, 255, 255, 0.07);
   --surface-3: rgba(255, 255, 255, 0.12);
-  --sunken: rgba(0, 0, 0, 0.32);
-  --line: rgba(255, 255, 255, 0.08);
-  --line-2: rgba(255, 255, 255, 0.14);
+  --sunken: rgba(0, 0, 0, 0.45);
+  --line: rgba(255, 255, 255, 0.1);
+  --line-2: rgba(255, 255, 255, 0.18);
 
   /* text */
-  --text: #eef1f6;        /* answers and main text (13:1+) */
-  --text-2: #b8c0cc;      /* secondary text (8:1) */
-  --muted: #939bab;       /* hints, captions (5:1) */
-  --on-fill: #0b0e14;     /* text on filled color buttons */
+  --text: #f4f4f4;
+  --text-2: #c6c6c6;
+  --muted: #8d8d8d;
+  --on-fill: #111111;
 
-  /* the one accent */
-  --accent: #7aa2f7;
-  --accent-hi: #a9c1ff;   /* section labels, bold-on-card highlights */
-  --accent-soft: rgba(122, 162, 247, 0.14);
-  --accent-line: rgba(122, 162, 247, 0.3);
+  /* chrome accent is white, not a brand color */
+  --accent: #f4f4f4;
+  --accent-hi: #e6e6e6;
+  --accent-soft: rgba(255, 255, 255, 0.08);
+  --accent-line: rgba(255, 255, 255, 0.18);
 
-  /* states */
-  --listen: #2dd4bf;      /* live, waiting for speech (teal) */
-  --speech: #4ade80;      /* live, hearing speech (green) */
-  --transcribe: #c4a7ff;  /* turning speech into text (lavender) */
-  --amber: #f5c451;       /* starting / thinking / click-through */
-  --rec: #ff7a70;         /* one-shot recording (coral) */
-  --danger: #ff8b85;      /* errors */
-  --say: #5bd69d;         /* "Say it" box edge */
+  /* signals */
+  --listen: #2dd4bf;
+  --speech: #4ade80;
+  --transcribe: #c4a7ff;
+  --amber: #f5c451;
+  --rec: #ff7a70;
+  --danger: #ff8b85;
+  --danger-text: #ffd6d2;
+  --say: #5bd69d;
 
-  --radius: 14px;
+  --meter: rgba(255, 255, 255, 0.16);
+  --thumb: rgba(255, 255, 255, 0.12);
+  --thumb-hover: rgba(255, 255, 255, 0.22);
+  --selection: rgba(255, 255, 255, 0.22);
+  --code-bg: rgba(0, 0, 0, 0.45);
+  --code-fg: #f0f0f0;
+  --chip: rgba(12, 12, 12, 0.92);
+  --chip-hover: rgba(32, 32, 32, 0.95);
+
+  --radius: 10px;
+  color-scheme: dark;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --t-fast: 130ms;
   --t: 200ms;
   --sans: "Source Sans 3", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: rgba(255, 255, 255, 0.96);
+  --surface: rgba(0, 0, 0, 0.03);
+  --surface-2: rgba(0, 0, 0, 0.05);
+  --surface-3: rgba(0, 0, 0, 0.08);
+  --sunken: rgba(0, 0, 0, 0.04);
+  --line: rgba(0, 0, 0, 0.1);
+  --line-2: rgba(0, 0, 0, 0.16);
+  --text: #111111;
+  --text-2: #3a3a3a;
+  --muted: #6b6b6b;
+  --on-fill: #ffffff;
+  --accent: #111111;
+  --accent-hi: #2a2a2a;
+  --accent-soft: rgba(0, 0, 0, 0.05);
+  --accent-line: rgba(0, 0, 0, 0.14);
+  --danger-text: #9d221c;
+  --meter: rgba(0, 0, 0, 0.16);
+  --thumb: rgba(0, 0, 0, 0.16);
+  --thumb-hover: rgba(0, 0, 0, 0.28);
+  --selection: rgba(0, 0, 0, 0.16);
+  --code-bg: rgba(0, 0, 0, 0.04);
+  --code-fg: #161616;
+  --chip: rgba(255, 255, 255, 0.96);
+  --chip-hover: #f3f3f3;
 }
 
 * { box-sizing: border-box; margin: 0; }
@@ -89,15 +128,12 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  backdrop-filter: blur(24px) saturate(1.3);
+  backdrop-filter: blur(20px);
   overflow: hidden;
-  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
 }
-.panel[data-mic="recording"] { border-color: rgba(255, 122, 112, 0.5); box-shadow: inset 0 0 0 1px rgba(255, 122, 112, 0.14); }
-.panel[data-mic="live"] { border-color: rgba(45, 212, 191, 0.42); box-shadow: inset 0 0 0 1px rgba(45, 212, 191, 0.12); }
-.panel.click-through { border-color: rgba(245, 196, 81, 0.65); box-shadow: inset 0 0 0 1px rgba(245, 196, 81, 0.25); }
+.panel.click-through { border-color: rgba(245, 196, 81, 0.7); }
 
 .drag { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
@@ -107,6 +143,8 @@ body {
 header { display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 12px; }
 .actions { display: flex; gap: 4px; }
 .actions button { width: 28px; height: 26px; padding: 0; display: inline-grid; place-items: center; color: var(--text-2); }
+#btn-settings { color: var(--text-2); }
+#btn-settings svg { display: block; }
 .stealth-ind { font-size: 11.5px; color: var(--amber); white-space: nowrap; flex-shrink: 0; }
 
 /* ---------- Buttons & inputs ---------- */
@@ -127,7 +165,7 @@ button {
     transform var(--t-fast) var(--ease);
 }
 button:hover { background-color: var(--surface-3); border-color: var(--line-2); color: var(--text); }
-button:active { transform: scale(0.96); transition-duration: 60ms; }
+button:active { transform: none; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-fill); font-weight: 650; }
 button.primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); color: var(--on-fill); }
@@ -201,7 +239,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .meter { display: flex; align-items: center; gap: 2px; height: 18px; transition: opacity var(--t) var(--ease); }
 .meter i {
   width: 3px; border-radius: 2px;
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--meter);
   transform: scaleY(0.5);
   transition: transform 90ms ease-out, background-color 90ms linear;
 }
@@ -239,9 +277,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .font-val { min-width: 34px; text-align: center; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .settings::-webkit-scrollbar, .output::-webkit-scrollbar { width: 8px; }
 .settings::-webkit-scrollbar-thumb, .output::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box;
+  background: var(--thumb); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box;
 }
-.settings::-webkit-scrollbar-thumb:hover, .output::-webkit-scrollbar-thumb:hover { background-color: rgba(255, 255, 255, 0.22); }
+.settings::-webkit-scrollbar-thumb:hover, .output::-webkit-scrollbar-thumb:hover { background-color: var(--thumb-hover); }
 
 /* ---------- Output ----------
    No CSS smooth scrolling here: answers stream in many small chunks and renderer.js pins the view
@@ -255,7 +293,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   border-top: 1px solid var(--line);
   overscroll-behavior: contain;
 }
-::selection { background: rgba(122, 162, 247, 0.35); }
+::selection { background: var(--selection); }
 
 .hint { padding: 14px 4px; color: var(--muted); font-size: 12.5px; }
 .hint-title { color: var(--text); font-weight: 650; font-size: 14px; margin-bottom: 10px; }
@@ -268,8 +306,7 @@ kbd {
   color: var(--text-2);
   background: var(--surface-2);
   border: 1px solid var(--line-2);
-  border-bottom-width: 2px;
-  border-radius: 5px;
+  border-radius: 4px;
   padding: 1px 5px;
 }
 
@@ -280,17 +317,17 @@ kbd {
 .msg.user {
   display: inline-block;
   max-width: 100%;
-  color: #d4e0ff;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-line);
-  border-radius: 10px 10px 10px 3px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 0;
+  border-radius: 8px;
   padding: 6px 10px;
   font-size: 0.88em;
   line-height: 1.45;
   white-space: pre-wrap;
 }
 .msg.error {
-  color: #ffd6d2;
+  color: var(--danger-text);
   background: rgba(255, 122, 112, 0.1);
   border: 1px solid rgba(255, 139, 133, 0.3);
   border-left: 3px solid var(--danger);
@@ -314,13 +351,13 @@ kbd {
 }
 .msg.bot .md > :first-child { margin-top: 0; }
 .msg.bot p { margin: 6px 0; }
-.msg.bot b { color: #fff; font-weight: 650; }
+.msg.bot b { color: var(--text); font-weight: 650; }
 .msg.bot i { color: var(--text-2); }
 .msg.bot ul, .msg.bot ol { padding-left: 20px; margin: 6px 0; }
 .msg.bot li { margin: 3px 0; padding-left: 2px; }
 .msg.bot li::marker { color: var(--accent); }
 .msg.bot li > ul, .msg.bot li > ol { margin: 2px 0; }
-.msg.bot .h { font-weight: 700; color: #fff; margin: 12px 0 4px; }
+.msg.bot .h { font-weight: 700; color: var(--text); margin: 12px 0 4px; }
 .msg.bot .h1, .msg.bot .h2 { font-size: 1.06em; }
 .msg.bot hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
 .msg.bot blockquote { border-left: 3px solid var(--line-2); padding-left: 10px; color: var(--text-2); margin: 6px 0; }
@@ -332,7 +369,7 @@ kbd {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--accent-hi);
+  color: var(--text-2);
 }
 .msg.bot .md > .section:first-child { margin-top: 0; }
 .msg.bot .say {
@@ -351,14 +388,14 @@ kbd {
 .msg.bot code {
   font-family: var(--mono);
   font-size: 0.84em;
-  color: #dbe4f5;
+  color: var(--code-fg);
   background: var(--surface-2);
   border: 1px solid var(--line);
   padding: 1px 5px;
   border-radius: 5px;
 }
 .msg.bot pre {
-  background: rgba(4, 6, 10, 0.5);
+  background: var(--code-bg);
   border: 1px solid var(--line);
   padding: 12px;
   border-radius: 10px;
@@ -366,7 +403,7 @@ kbd {
   margin: 0;
   line-height: 1.55;
 }
-.msg.bot pre code { background: none; border: 0; padding: 0; font-size: 0.82em; color: #e3e8f2; }
+.msg.bot pre code { background: none; border: 0; padding: 0; font-size: 0.82em; color: var(--code-fg); }
 
 /* Streaming: thinking dots + caret */
 .dots { display: inline-flex; gap: 4px; padding: 6px 0; vertical-align: middle; }
@@ -389,8 +426,8 @@ kbd {
 @keyframes caret { 50% { opacity: 0; } }
 
 /* Copy buttons */
-.copy-btn { font-size: 11px; line-height: 1; padding: 4px 7px; opacity: 0.6; background: rgba(22, 25, 32, 0.92); color: var(--text-2); }
-.copy-btn:hover { opacity: 1; background: rgba(40, 44, 54, 0.95); color: var(--text); }
+.copy-btn { font-size: 11px; line-height: 1; padding: 4px 7px; opacity: 0.6; background: var(--chip); color: var(--text-2); border-color: var(--line); }
+.copy-btn:hover { opacity: 1; background: var(--chip-hover); color: var(--text); }
 .copy-btn.done { opacity: 1; color: var(--speech); border-color: rgba(74, 222, 128, 0.35); }
 .copy-msg { position: absolute; top: 0; right: 0; opacity: 0; z-index: 1; }
 .msg.bot:hover .copy-msg, .copy-msg.done { opacity: 0.9; }
@@ -410,7 +447,7 @@ footer input { flex: 1; min-width: 0; border-radius: 10px; padding: 7px 12px; he
 footer button { flex-shrink: 0; }
 .ctl { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 10px; border-radius: 10px; font-weight: 600; }
 .ctl .ic { font-size: 13px; line-height: 1; }
-#btn-live.on, #btn-live.on:hover { background: var(--listen); border-color: var(--listen); color: var(--on-fill); }
+#btn-live.on, #btn-live.on:hover { background: var(--listen); border-color: var(--listen); color: #111; }
 #btn-live.on .ic { animation: caret 1.2s steps(2) infinite; }
 
 .output, footer { animation: fade-in var(--t) var(--ease); }

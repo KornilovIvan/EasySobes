@@ -489,6 +489,15 @@ async function openSettings() {
     if (el.tagName === 'SELECT' && el.selectedIndex < 0) el.selectedIndex = 0; // e.g. no language saved yet → Auto
   });
   $('s-source').value = window.audio?.getSource?.() || 'system';
+  $('s-theme').value = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+}
+
+function applyTheme(theme) {
+  const next = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try {
+    localStorage.setItem('theme', next);
+  } catch {}
 }
 
 async function saveSettings() {
@@ -513,6 +522,7 @@ input.addEventListener('keydown', (e) => {
   }
 });
 
+$('s-theme').onchange = () => applyTheme($('s-theme').value);
 $('btn-live').onclick = toggleLive;
 $('btn-screen').onclick = () => askScreen();
 $('btn-settings').onclick = openSettings;
