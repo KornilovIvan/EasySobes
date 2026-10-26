@@ -20,25 +20,51 @@ const { readResume, EXTENSIONS } = require('./resume');
 
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const DEFAULT_SETTINGS = {
-  // Any OpenAI-compatible API works. Groq has a free tier: https://console.groq.com/keys
-  // For fully offline/free use Ollama: baseUrl http://localhost:11434/v1, apiKey "ollama".
+  // Older builds stored one URL and one key for everything. Those two fields remain the
+  // fallback when a channel below is still empty.
   baseUrl: 'https://api.groq.com/openai/v1',
   apiKey: '',
+  // Speech, text and images can each use a different OpenAI-compatible server.
+  speechBaseUrl: '',
+  speechApiKey: '',
+  textBaseUrl: '',
+  textApiKey: '',
+  visionBaseUrl: '',
+  visionApiKey: '',
   // Text answers use the strongest public Groq model. Screen questions stay on Qwen:
   // it is the public model that accepts images. Speech picks a Whisper size in transcribe().
   chatModel: 'openai/gpt-oss-120b',
   visionModel: 'qwen/qwen3.8-27b',
   sttModel: 'whisper-large-v3-turbo',
   context: '',
-  mode: 'interview',
   language: 'auto', // auto | en | ru | hi | hinglish — what the other people speak
 };
 
 // Earlier builds stored this as the chat model. Text now goes to gpt-oss; vision stays on Qwen.
 const PREVIOUS_CHAT_MODEL = 'qwen/qwen3.8-27b';
 
-function isGroq(settings) {
-  return /api\.groq\.com/i.test(String(settings.baseUrl || ''));
+function isGroqUrl(url) {
+  return /api\.groq\.com/i.test(String(url || ''));
+}
+
+// An empty channel inherits the old shared URL and key, so existing setups keep working.
+function fillEndpoints(merged) {
+  const url = String(merged.baseUrl || DEFAULT_SETTINGS.baseUrl).replace(/\/$/, '');
+  const key = String(merged.apiKey || '');
+  for (const kind of ['speech', 'text', 'vision']) {
+    const urlKey = `${kind}BaseUrl`;
+    const keyKey = `${kind}ApiKey`;
+    if (!String(merged[urlKey] || '').trim()) merged[urlKey] = url;
+    if (!String(merged[keyKey] || '').trim()) merged[keyKey] = key;
+    merged[urlKey] = String(merged[urlKey]).replace(/\/$/, '');
+  }
+  return merged;
+}
+
+function endpoint(settings, kind) {
+  const url = String(settings[`${kind}BaseUrl`] || '').replace(/\/$/, '');
+  const key = String(settings[`${kind}ApiKey`] || '');
+  return { url, key, groq: isGroqUrl(url) };
 }
 
 let win;
@@ -54,10 +80,10 @@ if (!app.requestSingleInstanceLock()) {
 function loadSettings() {
   try {
     const saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
-    const merged = { ...DEFAULT_SETTINGS, ...saved };
+    const merged = fillEndpoints({ ...DEFAULT_SETTINGS, ...saved });
     let dirty = false;
     // One-time move off the old stock chat model. chatUpgraded lets a later manual edit stick.
-    if (isGroq(merged) && !saved.chatUpgraded && saved.chatModel === PREVIOUS_CHAT_MODEL) {
+    if (isGroqUrl(merged.textBaseUrl) && !saved.chatUpgraded && saved.chatModel === PREVIOUS_CHAT_MODEL) {
       merged.chatModel = DEFAULT_SETTINGS.chatModel;
       merged.chatUpgraded = true;
       dirty = true;
@@ -79,7 +105,7 @@ function loadSettings() {
     }
     return merged;
   } catch {
-    return { ...DEFAULT_SETTINGS };
+    return fillEndpoints({ ...DEFAULT_SETTINGS });
   }
 }
 
@@ -349,7 +375,8 @@ const DIALOGUE =
   'Treat it as what was actually said. Stay consistent with the candidate and do not repeat an answer they already gave. ' +
   'If the note says the candidate just asked a clarifying question, reply with one or two spoken sentences: ' +
   'a clearer version of their question when the interviewer was ambiguous, otherwise the answer they should give. ' +
-  'If the note says the interviewer just spoke, reply with the words the candidate should say next.';
+  'If the note says the interviewer just spoke, reply with the words the candidate should say next. ' +
+  'If that question asks them to write or fix code, add the code after one or two spoken sentences.';
 
 // A screen question drops the resume: the image is the expensive part.
 function buildMessages(userContent, settings, dialogue) {
@@ -377,12 +404,26 @@ function retryDelay(body) {
 // Russian answer was cut mid-sentence ("…код без.") when only a few hundred tokens were left
 // for the visible text. These ceilings are large enough to finish; the prompt still asks for
 // a short answer. A per-minute limit, if the account still has one, is handled by the 429 retry.
-const MAX_TOKENS = { interview: 1600, general: 2500, coding: 5000 };
-function maxTokensFor(settings, model) {
+function needsCodeRoom(userContent) {
+  // A screenshot hides the task in the image, so leave room for a real solution.
+  if (Array.isArray(userContent) && userContent.some((part) => part && part.type === 'image_url')) return true;
+  const text = typeof userContent === 'string'
+    ? userContent
+    : Array.isArray(userContent)
+      ? userContent.map((part) => (part && part.type === 'text' ? part.text : '')).join('\n')
+      : '';
+  // Only the latest ask counts. An older coding question must not enlarge every later reply.
+  const tail = text.slice(-800);
+  return /\b(write|implement|debug)\b.{0,48}\b(function|class|method|program|algorithm|solution|code)\b|\b(leetcode|coding (problem|task|question))\b|напиш\p{L}{0,6}\s+(код|функц|класс|программ|алгоритм)|реализуй|реализуйте|исправ\p{L}{0,4}\s+код/iu.test(
+    tail
+  );
+}
+
+function maxTokensFor(settings, model, roomy) {
   const n = Number(settings.maxTokens);
   if (Number.isFinite(n) && n >= 50) return Math.round(n);
-  const base = MAX_TOKENS[settings.mode] || 2500;
-  let budget = base;
+  // A spoken answer is short. A requested solution needs room for a whole code block.
+  let budget = roomy ? 5000 : 1600;
   // Devanagari and Cyrillic use more tokens than the same sentence in English.
   if (settings.language === 'hi' || settings.language === 'ru' || settings.language === 'auto') {
     budget = Math.max(budget, 2000);
@@ -394,12 +435,24 @@ function maxTokensFor(settings, model) {
 
 // gpt-oss rejects reasoning_effort "none" (low | medium | high only). Qwen accepts "none".
 // include_reasoning is gpt-oss-only: the trace stays in its own field and out of the overlay.
-function reasoningOptions(model, settings) {
-  if (!isGroq(settings)) return {};
-  const id = String(model || settings.chatModel || '');
+function reasoningOptions(model, roomy) {
+  const id = String(model || '');
   if (/gpt-oss/i.test(id)) return { reasoning_effort: 'low', include_reasoning: false };
-  if (/qwen/i.test(id)) return { reasoning_effort: settings.mode === 'coding' ? 'low' : 'none' };
+  if (/qwen/i.test(id)) return { reasoning_effort: roomy ? 'low' : 'none' };
   return {};
+}
+
+// Groq-only fields must not be sent to other servers. DeepSeek thinks before the first word
+// unless the request turns that off.
+function providerOptions(model, ep, roomy) {
+  if (ep.groq) return reasoningOptions(model, roomy);
+  if (/api\.deepseek\.com/i.test(ep.url)) return { thinking: { type: 'disabled' } };
+  return {};
+}
+
+const CHANNEL_NAME = { speech: 'speech', text: 'text', vision: 'image' };
+function missingKey(kind) {
+  return `Add the ${CHANNEL_NAME[kind] || kind} API key in Settings (⚙).`;
 }
 
 // "OTPM: Limit 1000, Used 600, Requested 900" -> a smaller max_tokens that fits now (or 0).
@@ -412,8 +465,15 @@ function outputBudgetLeft(body, current) {
   return room >= 200 ? room : 0;
 }
 
-function friendlyError(status, body) {
+function friendlyError(status, body, groq = true) {
   if (status === 429) {
+    if (!groq) {
+      const wait = retryDelay(body);
+      return (
+        'Rate limit reached. ' +
+        (wait ? `Wait about ${Math.ceil(wait / 1000)} seconds and try again.` : 'Wait a minute and try again.')
+      );
+    }
     if (/output tokens per minute|OTPM/i.test(body)) {
       return (
         'Groq free limit reached (1,000 answer tokens per minute). ' +
@@ -430,7 +490,7 @@ function friendlyError(status, body) {
       'Screen questions cost the most, so use them less often, or shorten your background text in ⚙.'
     );
   }
-  if (status === 401) return 'Your API key was rejected. Paste a fresh key in ⚙ (console.groq.com/keys).';
+  if (status === 401) return 'That API key was rejected. Check the key for this request in ⚙ Settings.';
   if (status === 413) return 'That request was too large. Try a smaller screenshot or a shorter background text.';
   try {
     const msg = JSON.parse(body)?.error?.message;
@@ -439,18 +499,20 @@ function friendlyError(status, body) {
   return `API error ${status}: ${body.slice(0, 300)}`;
 }
 
-async function streamChat(userContent, model, dialogue) {
+async function streamChat(userContent, model, dialogue, kind = 'text') {
   const settings = currentSettings();
-  if (!settings.apiKey) throw new Error('Add your API key in Settings (⚙).');
+  const ep = endpoint(settings, kind);
+  if (!ep.key) throw new Error(missingKey(kind));
 
   const messages = buildMessages(userContent, settings, dialogue);
-  const url = `${settings.baseUrl.replace(/\/$/, '')}/chat/completions`;
-  const chatModel = model || settings.chatModel;
-  let maxTokens = maxTokensFor(settings, chatModel);
+  const url = `${ep.url}/chat/completions`;
+  const chatModel = model || (kind === 'vision' ? settings.visionModel : settings.chatModel);
+  const roomy = needsCodeRoom(userContent);
+  let maxTokens = maxTokensFor(settings, chatModel, roomy);
   const post = () =>
     fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.key}` },
       body: JSON.stringify({
         model: chatModel,
         messages,
@@ -458,8 +520,8 @@ async function streamChat(userContent, model, dialogue) {
         temperature: 0.3,
         // Groq's current name is max_completion_tokens (max_tokens is the old alias).
         // Other OpenAI-compatible servers still read max_tokens.
-        ...(isGroq(settings) ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
-        ...reasoningOptions(chatModel, settings),
+        ...(ep.groq ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
+        ...providerOptions(chatModel, ep, roomy),
       }),
     });
 
@@ -478,17 +540,18 @@ async function streamChat(userContent, model, dialogue) {
       res = await post();
       continue;
     }
-    if (waits >= 2 || /request too large/i.test(body)) throw new Error(friendlyError(429, body));
+    if (waits >= 2 || /request too large/i.test(body)) throw new Error(friendlyError(429, body, ep.groq));
     waits++;
     const wait = retryDelay(body);
+    const limitName = ep.groq ? 'Groq free limit' : 'Rate limit';
     for (let left = Math.ceil(wait / 1000); left > 0; left--) {
-      win.webContents.send('answer-status', `Groq free limit reached — retrying in ${left}s…`);
+      win.webContents.send('answer-status', `${limitName} reached — retrying in ${left}s…`);
       await new Promise((r) => setTimeout(r, 1000));
     }
     win.webContents.send('answer-status', 'Retrying…');
     res = await post();
   }
-  if (!res.ok) throw new Error(friendlyError(res.status, await res.text()));
+  if (!res.ok) throw new Error(friendlyError(res.status, await res.text(), ep.groq));
 
   const decoder = new TextDecoder();
   let buffer = '';
@@ -551,28 +614,30 @@ ipcMain.handle('ask-screen', async (_e, payload) => {
       { type: 'image_url', image_url: { url: image } },
     ],
     settings.visionModel,
-    !!(payload && payload.dialogue)
+    !!(payload && payload.dialogue),
+    'vision'
   );
 });
 
 // Fold older turns into a short memory so each answer stays inside the free-tier token budget.
 async function completeChat(messages, maxTokens) {
   const settings = currentSettings();
-  if (!settings.apiKey) throw new Error('Add your API key in Settings (⚙).');
+  const ep = endpoint(settings, 'text');
+  if (!ep.key) throw new Error(missingKey('text'));
   const chatModel = settings.chatModel;
-  const res = await fetch(`${settings.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+  const res = await fetch(`${ep.url}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.key}` },
     body: JSON.stringify({
       model: chatModel,
       messages,
       stream: false,
       temperature: 0.2,
-      ...(isGroq(settings) ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
-      ...reasoningOptions(chatModel, settings),
+      ...(ep.groq ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
+      ...providerOptions(chatModel, ep, false),
     }),
   });
-  if (!res.ok) throw new Error(friendlyError(res.status, await res.text()));
+  if (!res.ok) throw new Error(friendlyError(res.status, await res.text(), ep.groq));
   const text = (await res.json()).choices?.[0]?.message?.content;
   if (!text || !String(text).trim()) throw new Error('empty summary');
   return String(text).trim();
@@ -615,7 +680,8 @@ ipcMain.handle('ensure-mic', async () => {
 
 ipcMain.handle('transcribe', async (_e, audioBuffer) => {
   const settings = loadSettings();
-  if (!settings.apiKey) throw new Error('Add your API key in Settings (⚙).');
+  const ep = endpoint(settings, 'speech');
+  if (!ep.key) throw new Error(missingKey('speech'));
   const form = new FormData();
   // The renderer sends 16 kHz WAV (it no longer uses MediaRecorder); keep webm as a fallback.
   const isWav = Buffer.from(audioBuffer.slice(0, 4)).toString('ascii') === 'RIFF';
@@ -627,7 +693,7 @@ ipcMain.handle('transcribe', async (_e, audioBuffer) => {
   // Large v3 hears Russian more accurately than turbo. English, Hindi and Hinglish keep the
   // faster model from settings. Auto does not lock a language, so it uses large v3 too.
   const sttModel =
-    isGroq(settings) && (settings.language === 'ru' || settings.language === 'auto')
+    ep.groq && (settings.language === 'ru' || settings.language === 'auto')
       ? 'whisper-large-v3'
       : settings.sttModel;
   form.append('model', sttModel);
@@ -644,12 +710,12 @@ ipcMain.handle('transcribe', async (_e, audioBuffer) => {
     form.append('language', 'hi');
     form.append('prompt', 'इंटरव्यू। अपने बारे में बताइए। आपका प्रोजेक्ट क्या था?');
   } else form.append('prompt', AUTO_HINT);
-  const res = await fetch(`${settings.baseUrl.replace(/\/$/, '')}/audio/transcriptions`, {
+  const res = await fetch(`${ep.url}/audio/transcriptions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${settings.apiKey}` },
+    headers: { Authorization: `Bearer ${ep.key}` },
     body: form,
   });
-  if (!res.ok) throw new Error(friendlyError(res.status, await res.text()));
+  if (!res.ok) throw new Error(friendlyError(res.status, await res.text(), ep.groq));
   return (await res.json()).text;
 });
 
@@ -682,7 +748,6 @@ app.whenReady().then(() => {
   register('CommandOrControl+Shift+Return', send('hotkey-screen'));
   register('CommandOrControl+Shift+R', send('hotkey-record'));
   register('CommandOrControl+Shift+K', send('hotkey-clear'));
-  register('CommandOrControl+Shift+M', send('hotkey-mode'));
   register('CommandOrControl+Shift+I', () => {
     win.show();
     win.focus();

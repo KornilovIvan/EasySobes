@@ -148,33 +148,6 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 select:disabled { opacity: 0.7; }
 input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
 
-/* ---------- Mode switcher (sliding pill; renderer.js sets --seg-x / --seg-w) ---------- */
-.seg {
-  position: relative;
-  display: flex; gap: 2px; padding: 2px;
-  background: var(--sunken); border: 1px solid var(--line); border-radius: 9px; flex-shrink: 0;
-}
-.seg::before {
-  content: "";
-  position: absolute;
-  top: 2px; bottom: 2px; left: 0;
-  width: var(--seg-w, 0);
-  transform: translateX(var(--seg-x, 0));
-  border-radius: 7px;
-  background: var(--accent);
-  opacity: 0;
-  transition: transform var(--t) var(--ease), width var(--t) var(--ease), opacity var(--t-fast) var(--ease);
-}
-.seg.ready::before { opacity: 1; }
-.seg button {
-  position: relative; z-index: 1;
-  border: 0; border-radius: 7px; padding: 3px 9px;
-  font-size: 11.5px; font-weight: 550; background: transparent; color: var(--muted);
-}
-.seg button:hover { background: var(--surface-2); color: var(--text); }
-.seg button.active { background: var(--accent); color: var(--on-fill); font-weight: 650; }
-.seg.ready button.active, .seg.ready button.active:hover { background: transparent; }
-
 /* ---------- Mic status bar ---------- */
 .micbar {
   --c: var(--muted);
@@ -254,6 +227,8 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .settings-back { display: flex; }
 .settings-back button { align-self: flex-start; padding: 6px 12px; font-weight: 650; }
 .settings-back button:active { transform: none; }
+.settings-note { margin: 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
+.settings-group { margin: 10px 0 0; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .settings label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--text-2); }
 .settings label input, .settings label select, .settings label textarea { font-weight: 400; font-size: 13px; }
 .settings label button { align-self: flex-start; margin: 2px 0 4px; font-weight: 500; }
@@ -325,30 +300,17 @@ kbd {
   line-height: 1.5;
 }
 
-/* Bot answers: comfortable reading */
+/* Bot answers sit on the panel like a chat reply: no card, no border, no label. */
 .msg.bot {
   position: relative;
   color: var(--text);
   line-height: 1.6;
   font-size: 1.02em;
-  background: linear-gradient(180deg, rgba(122, 162, 247, 0.1), rgba(122, 162, 247, 0.035));
-  border: 1px solid var(--accent-line);
-  border-left: 3px solid var(--accent);
-  border-radius: 12px;
-  padding: 11px 14px 12px;
-  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.45);
-  transition: border-color var(--t) var(--ease);
-}
-.msg.bot.streaming { border-color: rgba(122, 162, 247, 0.45); border-left-color: var(--accent); }
-.msg.bot::before {
-  content: "Answer";
-  display: block;
-  margin-bottom: 5px;
-  font-size: 0.66em;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--accent);
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 2px 28px 4px 10px;
+  box-shadow: none;
 }
 .msg.bot .md > :first-child { margin-top: 0; }
 .msg.bot p { margin: 6px 0; }
@@ -375,14 +337,13 @@ kbd {
 .msg.bot .md > .section:first-child { margin-top: 0; }
 .msg.bot .say {
   margin: 4px 0 6px;
-  padding: 10px 12px;
-  background: rgba(6, 9, 12, 0.34);
-  border: 1px solid rgba(91, 214, 157, 0.26);
-  border-left: 3px solid var(--say);
-  border-radius: 10px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
   font-size: 1.04em;
   line-height: 1.65;
-  color: #f5f7fa;
+  color: var(--text);
 }
 .msg.bot .say p { margin: 0 0 6px; }
 .msg.bot .say p:last-child { margin-bottom: 0; }
@@ -431,7 +392,7 @@ kbd {
 .copy-btn { font-size: 11px; line-height: 1; padding: 4px 7px; opacity: 0.6; background: rgba(22, 25, 32, 0.92); color: var(--text-2); }
 .copy-btn:hover { opacity: 1; background: rgba(40, 44, 54, 0.95); color: var(--text); }
 .copy-btn.done { opacity: 1; color: var(--speech); border-color: rgba(74, 222, 128, 0.35); }
-.copy-msg { position: absolute; top: 8px; right: 8px; opacity: 0; z-index: 1; }
+.copy-msg { position: absolute; top: 0; right: 0; opacity: 0; z-index: 1; }
 .msg.bot:hover .copy-msg, .copy-msg.done { opacity: 0.9; }
 .code-wrap { position: relative; margin: 8px 0; }
 .code-wrap .copy-code { position: absolute; top: 6px; right: 6px; }
@@ -449,12 +410,8 @@ footer input { flex: 1; min-width: 0; border-radius: 10px; padding: 7px 12px; he
 footer button { flex-shrink: 0; }
 .ctl { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 10px; border-radius: 10px; font-weight: 600; }
 .ctl .ic { font-size: 13px; line-height: 1; }
-#btn-mic.on, #btn-mic.on:hover { background: var(--rec); border-color: var(--rec); color: var(--on-fill); }
 #btn-live.on, #btn-live.on:hover { background: var(--listen); border-color: var(--listen); color: var(--on-fill); }
 #btn-live.on .ic { animation: caret 1.2s steps(2) infinite; }
-#btn-source.src { height: 32px; border-radius: 10px; font-size: 11.5px; font-weight: 600; min-width: 42px; color: var(--text-2); }
-/* Answers that already start with a section label ("Talking points") don't need the generic "Answer" tag. */
-.msg.bot:has(.md > .section:first-child)::before { display: none; }
 
 .output, footer { animation: fade-in var(--t) var(--ease); }
 @keyframes fade-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }

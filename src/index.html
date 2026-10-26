@@ -19,11 +19,6 @@
         <span id="mic-time" class="mic-time"></span>
       </div>
       <span id="stealth-ind" class="stealth-ind hidden" title="Stealth status"></span>
-      <div id="modes" class="seg no-drag" title="Answer mode (⌘⇧M)">
-        <button data-mode="interview">Interview</button>
-        <button data-mode="coding">Code</button>
-        <button data-mode="general">General</button>
-      </div>
       <div class="actions no-drag">
         <button id="btn-settings" title="Settings">⚙</button>
         <button id="btn-hide" title="Hide (⌘⇧Space)">—</button>
@@ -34,11 +29,19 @@
       <div class="settings-back">
         <button id="btn-settings-back" type="button">← Back to chat</button>
       </div>
-      <label>API base URL <input id="s-baseUrl" /></label>
-      <label>API key <input id="s-apiKey" type="password" placeholder="gsk_... (free at console.groq.com)" /></label>
-      <label>Chat model <input id="s-chatModel" /></label>
-      <label>Vision model <input id="s-visionModel" /></label>
-      <label>Speech-to-text model <input id="s-sttModel" /></label>
+      <p class="settings-note">Speech, text and images each use their own server. A blank field keeps the shared Groq URL and key.</p>
+      <h3 class="settings-group">Speech</h3>
+      <label>API base URL <input id="s-speechBaseUrl" placeholder="https://api.groq.com/openai/v1" /></label>
+      <label>API key <input id="s-speechApiKey" type="password" placeholder="gsk_... (console.groq.com)" /></label>
+      <label>Speech-to-text model <input id="s-sttModel" placeholder="whisper-large-v3-turbo" /></label>
+      <h3 class="settings-group">Text</h3>
+      <label>API base URL <input id="s-textBaseUrl" placeholder="https://api.deepseek.com" /></label>
+      <label>API key <input id="s-textApiKey" type="password" placeholder="sk-..." /></label>
+      <label>Chat model <input id="s-chatModel" placeholder="deepseek-flash" /></label>
+      <h3 class="settings-group">Images</h3>
+      <label>API base URL <input id="s-visionBaseUrl" placeholder="https://api.deepseek.com" /></label>
+      <label>API key <input id="s-visionApiKey" type="password" placeholder="sk-..." /></label>
+      <label>Vision model <input id="s-visionModel" placeholder="deepseek-flash" /></label>
       <label>Audio source
         <select id="s-source" disabled>
           <option value="both">Interviewer (laptop audio) and you (microphone)</option>
@@ -54,7 +57,6 @@
           <option value="hinglish">Hinglish (Hindi + English mix)</option>
         </select>
       </label>
-      <label class="check"><input type="checkbox" id="s-autoListen" /> Start listening automatically when EasySobes opens</label>
       <label>Your background (resume)
         <button id="btn-resume" type="button" title="Pick a PDF / Word / text file">📄 Load resume</button>
         <textarea id="s-context" rows="6"></textarea>
@@ -78,7 +80,6 @@
           <dt><kbd>⌘⇧R</kbd></dt><dd>Record once, then answer</dd>
           <dt><kbd>⌘⇧↩</kbd></dt><dd>Read the screen and answer</dd>
           <dt><kbd>⌘⇧I</kbd></dt><dd>Type a question</dd>
-          <dt><kbd>⌘⇧M</kbd></dt><dd>Switch answer mode</dd>
           <dt><kbd>⌘⇧K</kbd></dt><dd>Clear the screen</dd>
           <dt><kbd>⌘⇧T</kbd></dt><dd>Click-through · <kbd>⌘⇧O</kbd> <kbd>⌘⇧P</kbd> opacity</dd>
           <dt><kbd>⌘⇧Space</kbd></dt><dd>Show / hide · <kbd>⌘⇧Q</kbd> quit</dd>
@@ -87,9 +88,7 @@
     </main>
 
     <footer class="no-drag">
-      <button id="btn-mic" class="ctl" title="Record once, then answer (⌘⇧R)"><span class="ic">🎙</span><span class="lbl">Record</span></button>
       <button id="btn-live" class="ctl" title="Live listen, auto-answer (⌘⇧L)"><span class="ic">◉</span><span class="lbl">Live</span></button>
-      <button id="btn-source" class="src" title="Listening to the interviewer (laptop audio) and you (microphone). Use headphones.">Both</button>
       <button id="btn-screen" class="ctl" title="Read screen (⌘⇧Enter)"><span class="ic">🖥</span></button>
       <input id="input" placeholder="Ask anything…" />
     </footer>

@@ -2,9 +2,19 @@ const $ = (id) => document.getElementById(id);
 const output = $('output');
 const hintHTML = output.innerHTML;
 const input = $('input');
-const SETTING_KEYS = ['baseUrl', 'apiKey', 'chatModel', 'visionModel', 'sttModel', 'language', 'context'];
-const MODES = ['interview', 'coding', 'general'];
-
+const SETTING_KEYS = [
+  'speechBaseUrl',
+  'speechApiKey',
+  'textBaseUrl',
+  'textApiKey',
+  'visionBaseUrl',
+  'visionApiKey',
+  'chatModel',
+  'visionModel',
+  'sttModel',
+  'language',
+  'context',
+];
 // Hotkey labels are written Mac-style (⌘⇧R). On Windows/Linux, rewrite every label to Ctrl+Shift+R,
 // including text that other modules set later.
 if (!navigator.userAgent.includes('Macintosh')) {
@@ -28,7 +38,6 @@ if (!navigator.userAgent.includes('Macintosh')) {
 let busy = false;
 let currentBot = null;
 let currentText = '';
-let mode = 'interview';
 
 // Notices that used to sit in the header. The speech line stays put; the hint line
 // shows the notice, then returns. A "busy" notice stays until the work finishes.
@@ -335,43 +344,6 @@ function clearAll() {
   window.audio?.clearConversation?.();
 }
 
-// ---------- Answer mode ----------
-
-function renderMode() {
-  document.querySelectorAll('#modes button').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
-  placeModePill();
-}
-
-// The active mode has a pill behind it that slides between buttons (see .seg::before in styles.css).
-// Until it has been measured, the active button keeps its own background, so nothing ever looks unselected.
-function placeModePill() {
-  const seg = $('modes');
-  const active = seg.querySelector('button.active');
-  if (!active || !active.offsetWidth) return seg.classList.remove('ready');
-  seg.style.setProperty('--seg-x', `${active.offsetLeft}px`);
-  seg.style.setProperty('--seg-w', `${active.offsetWidth}px`);
-  seg.classList.add('ready');
-}
-document.fonts?.ready.then(placeModePill).catch(() => {});
-window.addEventListener('resize', placeModePill);
-
-async function setMode(next) {
-  if (!MODES.includes(next)) return;
-  mode = next;
-  renderMode();
-  try {
-    await window.sobes.saveSettings({ mode });
-  } catch (err) {
-    setStatus(`Could not save mode: ${err.message}`);
-  }
-}
-
-function cycleMode() {
-  setMode(MODES[(MODES.indexOf(mode) + 1) % MODES.length]);
-}
-
-document.querySelectorAll('#modes button').forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
-
 // ---------- Font size (per-device, localStorage) ----------
 
 const FONT_MIN = 10;
@@ -445,29 +417,7 @@ window.sobes
 
 // ---------- Audio source / live listen ----------
 
-const SOURCE_LABELS = { system: 'Sys', mic: 'Mic', both: 'Both' };
 const SOURCE_NAMES = { system: 'System audio', mic: 'Microphone', both: 'System + mic' };
-
-function showSource(src) {
-  if (!SOURCE_LABELS[src]) return;
-  $('btn-source').textContent = SOURCE_LABELS[src];
-  $('btn-source').title = src === 'both'
-    ? 'Listening to the interviewer (laptop audio) and you (microphone). Use headphones.'
-    : 'Microphone is off. Only the interviewer is heard.';
-}
-
-async function cycleSource() {
-  if (typeof window.audio?.cycleSource !== 'function') {
-    setStatus('Audio source switching not available yet');
-    return;
-  }
-  try {
-    const src = await window.audio.cycleSource();
-    showSource(src);
-  } catch (err) {
-    addMessage('error', escapeHtml(`Audio source error: ${err.message}`));
-  }
-}
 
 function toggleLive() {
   if (typeof window.audio?.toggleLive !== 'function') return setStatus('Live listen not available yet');
@@ -508,15 +458,9 @@ function renderMic(st) {
   micSince = on ? st.since : 0;
   renderMicTime();
 
-  const mic = $('btn-mic');
-  mic.classList.toggle('on', st.mode === 'recording');
-  mic.querySelector('.lbl').textContent =
-    st.mode === 'recording' ? 'Stop' : st.mode === 'live' ? 'Answer now' : 'Record';
-  mic.title = st.mode === 'live' ? 'Answer what was just said, now (⌘⇧R)' : 'Record once, then answer (⌘⇧R)';
   const liveBtn = $('btn-live');
   liveBtn.classList.toggle('on', st.mode === 'live');
   liveBtn.querySelector('.lbl').textContent = st.mode === 'live' ? 'Stop' : 'Live';
-  if (st.source) showSource(st.source);
 }
 
 function renderMicTime() {
@@ -545,7 +489,6 @@ async function openSettings() {
     if (el.tagName === 'SELECT' && el.selectedIndex < 0) el.selectedIndex = 0; // e.g. no language saved yet → Auto
   });
   $('s-source').value = window.audio?.getSource?.() || 'system';
-  $('s-autoListen').checked = window.audio?.getAutoListen?.() ?? true;
 }
 
 async function saveSettings() {
@@ -554,8 +497,6 @@ async function saveSettings() {
   await window.sobes.saveSettings(settings);
   try {
     window.audio?.setSource?.($('s-source').value);
-    window.audio?.setAutoListen?.($('s-autoListen').checked);
-    showSource(window.audio?.getSource?.());
   } catch {}
   closeSettings();
   setStatus('Settings saved');
@@ -572,16 +513,6 @@ input.addEventListener('keydown', (e) => {
   }
 });
 
-// Works while the window is focused; the global version arrives as 'hotkey-mode' from main.
-document.addEventListener('keydown', (e) => {
-  if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.code === 'KeyM') {
-    e.preventDefault();
-    cycleMode();
-  }
-});
-
-$('btn-mic').onclick = () => window.audio.toggleRecording();
-$('btn-source').onclick = cycleSource;
 $('btn-live').onclick = toggleLive;
 $('btn-screen').onclick = () => askScreen();
 $('btn-settings').onclick = openSettings;
@@ -605,20 +536,15 @@ window.sobes.on('hotkey-record', () => window.audio.toggleRecording());
 window.sobes.on('hotkey-screen', askScreen);
 window.sobes.on('hotkey-clear', clearAll);
 window.sobes.on('hotkey-focus', () => input.focus());
-window.sobes.on('hotkey-mode', cycleMode);
 
-renderMode();
 // audio-renderer.js loads after this file, so read the source once everything is parsed.
 window.addEventListener('DOMContentLoaded', () => {
-  showSource(window.audio?.getSource?.());
   if (window.audio?.getState) renderMic(window.audio.getState());
 });
 window.sobes.getSettings()
   .then((s) => {
-    if (MODES.includes(s.mode)) mode = s.mode;
-    renderMode();
-    if (!s.apiKey) {
-      addMessage('error', 'No API key yet. Paste a free Groq key from console.groq.com/keys below, then click Save.');
+    if (!s.textApiKey && !s.speechApiKey) {
+      addMessage('error', 'No API key yet. Open Settings and paste a key for speech and for text, then click Save.');
       openSettings();
     }
   })

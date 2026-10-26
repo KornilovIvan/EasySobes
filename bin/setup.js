@@ -193,7 +193,20 @@ async function runSetup({ ifNeeded = false } = {}) {
     console.log(red('\nNo API key, so nothing was saved. Run "sobes setup" again when you have one.'));
     return false;
   }
-  saveSettings({ apiKey, baseUrl, profile, context });
+  // A channel that already points somewhere else (for example text on DeepSeek) keeps its own key.
+  const previous = current.apiKey || '';
+  const patch = { apiKey, baseUrl, profile, context };
+  for (const kind of ['speech', 'text', 'vision']) {
+    const ownKey = current[`${kind}ApiKey`] || '';
+    const ownUrl = current[`${kind}BaseUrl`] || '';
+    const stillShared = !ownKey || ownKey === previous;
+    const stillGroq = !ownUrl || /api\.groq\.com/i.test(ownUrl);
+    if (stillShared && stillGroq) {
+      patch[`${kind}ApiKey`] = apiKey;
+      patch[`${kind}BaseUrl`] = baseUrl;
+    }
+  }
+  saveSettings(patch);
   console.log(`\n${green('✅ All set!')} Saved to ${dim(settingsFile())}`);
   return true;
 }

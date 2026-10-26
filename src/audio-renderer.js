@@ -318,6 +318,7 @@
       lines.push(
         '',
         'The interviewer just spoke (the last Interviewer line). Give the answer the candidate should say next. ' +
+          'If they asked for code, add it after one or two spoken sentences. ' +
           'Stay consistent with what the candidate already said, and do not repeat it.'
       );
     }
@@ -393,7 +394,7 @@
   let processing = false;
   let transcribing = false;
 
-  // wantLive = the user wants to be listening (auto-start or ⌘⇧L). While it is true,
+  // wantLive = the user turned Live on (the button or ⌘⇧L). While it is true,
   // any capture failure reconnects on its own instead of turning live off,
   // because the owner can't press anything during an interview.
   let wantLive = false;
@@ -767,28 +768,12 @@
 
   window.sobes.on('audio-toggle-live', toggleLive);
 
-  // Start listening on launch (unless turned off in Settings), so nothing has to be
-  // pressed during an interview.
-  function autoListen() {
-    try {
-      return localStorage.getItem('autoListen') !== 'off';
-    } catch {
-      return true;
-    }
-  }
-  if (autoListen()) setTimeout(() => !live && !wantLive && startLive(), 1500);
   micState.source = getSource();
 
   window.audio = {
     toggleRecording,
     toggleLive,
     isLive: () => !!live,
-    getAutoListen: autoListen,
-    setAutoListen: (on) => {
-      try {
-        localStorage.setItem('autoListen', on ? 'on' : 'off');
-      } catch {}
-    },
     getState: () => ({ ...micState }),
     cycleSource,
     getSource,

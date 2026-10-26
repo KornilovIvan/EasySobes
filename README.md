@@ -6,7 +6,7 @@ It is left out of screen shares and screenshots, so only you see it.
 - **Free.** Uses your own free [Groq](https://console.groq.com/keys) API key. No account with us, no subscription.
 - **Private.** Your key, profile and resume stay on your computer. Nothing goes anywhere except the AI provider you choose.
 - **macOS and Windows.**
-- **Hands-free.** It starts listening by itself and answers questions automatically.
+- **Hands-free once Live is on.** Press Live (or ⌘⇧L). After that, questions are answered without another click.
 - **English, Russian, Hindi and Hinglish.** Choose the language in ⚙ Settings.
 - Reads your screen for coding questions, and knows your resume so it answers *as you*.
 
@@ -71,7 +71,7 @@ sobes update    get the latest version
 sobes help      list the commands
 ```
 
-After `sobes`, the overlay appears in the top-right corner and starts listening after a second.
+After `sobes`, the overlay appears in the top-right corner and waits. Press **Live** (or ⌘⇧L) to start listening.
 When someone asks a question, the answer shows up by itself.
 
 To change the language EasySobes listens for, open ⚙ Settings → "Language they speak".
@@ -87,7 +87,6 @@ On macOS the keys are ⌘⇧ (Command+Shift). On Windows they are Ctrl+Shift.
 | ⌘⇧R | Answer what was just said, right now |
 | ⌘⇧Enter | Read the screen and answer (coding problems, questions) |
 | ⌘⇧I | Type a question |
-| ⌘⇧M | Answer mode: Interview / Coding / General |
 | ⌘⇧K | Clear |
 | ⌘⇧T | Click-through (clicks pass through the window) |
 | ⌘⇧O / ⌘⇧P | Less / more opacity |
@@ -112,10 +111,11 @@ On Windows, allow the microphone if Windows asks. Hiding from screen shares need
 - Always test in the app you share from (Zoom, Meet, Teams) before a real call. Whether a window stays hidden depends on how that app captures the screen.
 - Groq's free tier allows about 7,000 input tokens per minute. Screen questions use the most. If you hit the limit, EasySobes waits and retries by itself.
 - Your settings file: `~/Library/Application Support/easysobes/settings.json` (macOS) or `%APPDATA%\easysobes\settings.json` (Windows). The log file `easysobes.log` is in the same folder.
-- Audio clips, screenshots and your resume text are sent to the AI provider (Groq by default) to make answers. Read their privacy policy if that matters to you.
+- Speech, text and images each have their own base URL and key in Settings. A blank field keeps the shared Groq value, so an existing setup keeps working.
+- Audio clips, screenshots and your resume text are sent to whichever providers those three fields point at (Groq by default). Read their privacy policy if that matters to you.
 
 ### Fully offline (optional)
-Install [Ollama](https://ollama.com), then in EasySobes's ⚙ Settings set the base URL to `http://localhost:11434/v1`, the key to `ollama`, and pick local models. Speech-to-text still needs a cloud key.
+Install [Ollama](https://ollama.com), then in Settings set the text and image base URLs to `http://localhost:11434/v1`, the keys to `ollama`, and pick local models. Speech still needs a cloud speech URL, such as Groq Whisper.
 
 ## Install by hand (for developers)
 You need [Node.js 20+](https://nodejs.org) and git.
@@ -182,7 +182,7 @@ Only do this if no other app you use needs it.
 | `src/main.js` | Window, hotkeys, settings, AI calls |
 | `src/audio-main.js`, `src/audio-renderer.js` | System-audio capture, voice detection, live mode |
 | `src/renderer.js`, `src/index.html`, `src/styles.css` | The overlay UI |
-| `src/prompts.js` | How answers are worded for each mode |
+| `src/prompts.js` | How an answer is shaped from the question |
 | `src/stealth.js` | Click-through, opacity, capture self-test |
 | `src/resume.js` | Reads PDF / Word resumes |
 | `bin/sobes.js`, `bin/setup.js` | The `sobes` command and the setup wizard |

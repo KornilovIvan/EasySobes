@@ -87,7 +87,7 @@ function help() {
   sobes help      show this list
 
 Hotkeys: ${KEYS}Space show/hide · ${KEYS}L live listen · ${KEYS}R record
-         ${KEYS}Enter read screen · ${KEYS}M answer mode · ${KEYS}Q quit`);
+         ${KEYS}Enter read screen · ${KEYS}Q quit`);
   return 0;
 }
 
