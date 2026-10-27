@@ -200,16 +200,43 @@ function renderMarkdown(md) {
 
 // ---------- Messages ----------
 
-// Keep the newest text in view while an answer streams, but let the user scroll up to read without
-// being yanked back down. Scrolling is instant on purpose: the new card already glides in via CSS,
-// and a smooth scroll per chunk would lag behind the text and fight the next chunk.
-let stickToBottom = true;
-output.addEventListener('scroll', () => {
-  stickToBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 48;
-});
-function scrollToEnd(force = false) {
-  if (force) stickToBottom = true;
-  if (stickToBottom) output.scrollTop = output.scrollHeight;
+// A new question sits at the top of the transcript. The answer grows under it and the view stays put.
+function pinSpacer() {
+  let spacer = output.querySelector('.pin-spacer');
+  if (!spacer) {
+    spacer = document.createElement('div');
+    spacer.className = 'pin-spacer';
+    spacer.setAttribute('aria-hidden', 'true');
+  }
+  if (spacer !== output.lastElementChild) output.appendChild(spacer);
+  return spacer;
+}
+
+function questionScrollTop(question) {
+  const pad = parseFloat(getComputedStyle(output).paddingTop) || 0;
+  const delta = question.getBoundingClientRect().top - (output.getBoundingClientRect().top + output.clientTop + pad);
+  return Math.max(0, output.scrollTop + delta);
+}
+
+// Leave just enough blank space under the latest question and answer for that question to reach the top.
+function fitPinSpacer() {
+  const questions = output.querySelectorAll('.msg.user');
+  const question = questions[questions.length - 1];
+  if (!question) {
+    output.querySelector('.pin-spacer')?.remove();
+    return null;
+  }
+  const spacer = pinSpacer();
+  const contentY = questionScrollTop(question);
+  const tail = output.scrollHeight - spacer.offsetHeight - contentY;
+  spacer.style.height = `${Math.max(0, output.clientHeight - tail)}px`;
+  return question;
+}
+
+function pinLatestQuestion() {
+  const question = fitPinSpacer();
+  if (!question) return;
+  output.scrollTop = questionScrollTop(question);
 }
 
 let restoring = false;
@@ -222,8 +249,11 @@ function addMessage(cls, html) {
   const el = document.createElement('div');
   el.className = `msg ${cls}`;
   el.innerHTML = html;
-  output.appendChild(el);
-  scrollToEnd(true);
+  const spacer = output.querySelector('.pin-spacer');
+  if (spacer) output.insertBefore(el, spacer);
+  else output.appendChild(el);
+  if (!restoring && (cls.includes('user') || cls.includes('bot'))) pinLatestQuestion();
+  else if (!restoring) fitPinSpacer();
   if (!restoring && (cls.includes('user') || cls.includes('error'))) rememberVisible(cls.includes('error') ? 'error' : 'user', el.textContent);
   return el;
 }
@@ -282,7 +312,7 @@ window.sobes.on('answer-chunk', (delta) => {
   if (!currentBot) return;
   currentText += delta;
   currentBot.innerHTML = renderMarkdown(currentText);
-  scrollToEnd();
+  fitPinSpacer();
 });
 
 // A request that arrives mid-answer (e.g. ⌘⇧Return while a live answer streams) waits its
@@ -305,7 +335,7 @@ async function run(label, fn) {
     if (!currentText && typeof answer === 'string' && answer) {
       currentText = answer;
       currentBot.innerHTML = renderMarkdown(answer);
-      scrollToEnd();
+      fitPinSpacer();
     }
     if (currentText) finalizeBot(msg, currentText);
     msg.classList.remove('streaming');
@@ -538,7 +568,7 @@ function paintChat(chat) {
     else addMessage('user', escapeHtml(m.text));
   }
   restoring = false;
-  scrollToEnd(true);
+  pinLatestQuestion();
 }
 
 function openChat(id) {
