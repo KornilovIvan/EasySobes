@@ -263,8 +263,9 @@
   // Both sides are kept for this sitting. Clear (⌘⇧K) drops it. Older turns are
   // compressed so a long interview still fits in the free-tier token budget.
 
-  const KEEP_RAW = 14;
-  const SUMMARIZE_AT = 20;
+  // The last 10 lines go with every answer. Anything older is folded into a short summary.
+  const KEEP_RAW = 10;
+  const SUMMARIZE_AT = 10;
   const conversation = { turns: [], summary: '' };
   let generation = 0;
   let summarizing = false;
@@ -316,7 +317,7 @@
   }
 
   function turnsForModel() {
-    const from = conversation.turns.length > 24 ? conversation.turns.length - 24 : 0;
+    const from = conversation.turns.length > KEEP_RAW ? conversation.turns.length - KEEP_RAW : 0;
     return conversation.turns.slice(from).map((t) => ({ role: t.role, text: clip(t.text) }));
   }
 
