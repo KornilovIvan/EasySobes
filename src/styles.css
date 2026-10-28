@@ -500,6 +500,10 @@ kbd {
   line-height: 1.45;
   white-space: pre-wrap;
 }
+.msg.heard-pending { opacity: 0.7; }
+.stall-note { margin-top: 8px; font-size: 0.85em; color: var(--muted); }
+.stall-note .retry-answer { margin-left: 8px; padding: 1px 8px; font-size: 1em; }
+.msg .answer-line { margin-left: 8px; padding: 1px 8px; font-size: 0.85em; vertical-align: baseline; }
 .msg.error {
   color: var(--danger-text);
   background: rgba(255, 122, 112, 0.1);

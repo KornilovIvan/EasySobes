@@ -35,7 +35,8 @@ if (!navigator.userAgent.includes('Macintosh')) {
   ).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['title', 'placeholder'] });
 }
 
-let busy = false;
+let answerEpoch = 0;
+let answerSerial = 0;
 let currentBot = null;
 let currentText = '';
 let shownSolution = '';
@@ -419,14 +420,24 @@ stage.addEventListener('click', async (e) => {
   }
 });
 
-window.sobes.on('answer-status', (text) => {
+function answerPayload(payload) {
+  const id = payload && typeof payload === 'object' ? payload.id : null;
+  const text = typeof payload === 'string' ? payload : payload && (payload.delta || payload.text);
+  return { id, text };
+}
+
+window.sobes.on('answer-status', (payload) => {
+  const { id, text } = answerPayload(payload);
+  if (id != null && id !== answerEpoch) return;
   setStatus(text, 'busy');
   if (currentBot && !currentText) currentBot.innerHTML = `<span class="dots"><i></i><i></i><i></i></span> ${escapeHtml(text)}`;
 });
 
-window.sobes.on('answer-chunk', (delta) => {
-  if (!currentBot) return;
-  currentText += delta;
+window.sobes.on('answer-chunk', (payload) => {
+  const { id, text } = answerPayload(payload);
+  if (!currentBot || !text) return;
+  if (id != null && id !== answerEpoch) return;
+  currentText += text;
   paintLive(currentText);
 });
 
@@ -446,6 +457,8 @@ async function run(label, fn) {
     return;
   }
   busy = true;
+  const epoch = ++answerSerial;
+  answerEpoch = epoch;
   setStatus('Thinking…', 'busy');
   solutionDismissed = false;
   if (label) addMessage('user', escapeHtml(label));
@@ -453,7 +466,7 @@ async function run(label, fn) {
   const msg = addMessage('bot streaming', '<div class="md"><span class="dots"><i></i><i></i><i></i></span></div>');
   currentBot = msg.querySelector('.md');
   try {
-    const answer = await fn();
+    const answer = await fn(epoch);
     if (!currentText && typeof answer === 'string' && answer) {
       currentText = answer;
       paintLive(answer);
@@ -463,16 +476,43 @@ async function run(label, fn) {
     msg.classList.remove('streaming');
     setStatus('');
   } catch (err) {
-    msg.remove();
-    clearSolution();
-    addMessage('error', escapeHtml(String(err.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')));
-    window.sobes.send('log', `run failed: ${err && err.stack ? err.stack : err}`);
-    setStatus('');
+    const text = String(err.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    const stalled = /Couldn't finish this answer|didn't start in time/.test(text);
+    if (stalled && currentText) {
+      msg.classList.remove('streaming');
+      finalizeBot(msg, currentText);
+      msg.append(retryNote(label, fn));
+      window.sobes.send('log', `run stalled with partial: ${text}`);
+      setStatus('');
+    } else {
+      msg.remove();
+      if (!stalled) clearSolution();
+      const el = addMessage('error', escapeHtml(text));
+      if (stalled) el.append(retryNote(label, fn));
+      window.sobes.send('log', `run failed: ${err && err.stack ? err.stack : err}`);
+      setStatus('');
+    }
   } finally {
     currentBot = null;
     busy = false;
     if (queue.length) run(...queue.shift());
   }
+}
+
+function retryNote(label, fn) {
+  const note = document.createElement('div');
+  note.className = 'stall-note';
+  note.textContent = "Couldn't finish this answer";
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'retry-answer';
+  btn.textContent = 'Answer';
+  btn.addEventListener('click', () => {
+    note.remove();
+    run(label, fn);
+  });
+  note.append(btn);
+  return note;
 }
 
 function askText(text) {
@@ -482,7 +522,7 @@ function askText(text) {
   const payload = heard
     ? { text: `${heard}\n\nThe candidate typed this request:\n${text}`, dialogue: true }
     : { text, dialogue: false };
-  run(text, () => window.sobes.ask({ ...payload, label: text }));
+  run(text, (id) => window.sobes.ask({ ...payload, label: text, id }));
 }
 
 function askScreen() {
@@ -493,7 +533,7 @@ function askScreen() {
   const body = heard
     ? `${heard}\n\n${text || 'Find the one question on the screen and answer it using the conversation above.'}`
     : text;
-  run(label, () => window.sobes.askScreen({ text: body, label, dialogue: !!heard }));
+  run(label, (id) => window.sobes.askScreen({ text: body, label, dialogue: !!heard, id }));
 }
 
 function clearAll() {

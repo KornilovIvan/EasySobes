@@ -82,10 +82,10 @@
 
   // ---------- shared answer flow ----------
 
-  function answer(transcript) {
+  function answer(transcript, focus = '') {
     const label = `🎧 ${transcript}`;
-    const text = dialogueText();
-    return run(label, () => window.sobes.ask({ text, dialogue: true, label }));
+    const text = dialogueText(focus);
+    return run(label, (id) => window.sobes.ask({ text, dialogue: true, label, id }));
   }
 
   // ---------- manual push-to-record (⌘⇧R) ----------
@@ -269,6 +269,7 @@
   let summaryFailedAt = 0;
 
   function clearConversation() {
+    takeHeld();
     generation++;
     conversation.turns = [];
     conversation.summary = '';
@@ -285,6 +286,7 @@
 
   // Switching chats replaces the live memory. A summary still in flight belongs to the previous chat.
   function setMemory(mem) {
+    takeHeld();
     generation++;
     summarizing = false;
     conversation.turns = Array.isArray(mem?.turns)
@@ -338,7 +340,7 @@
     );
   }
 
-  function dialogueText() {
+  function dialogueText(focus = '') {
     const lines = [];
     const context = contextBlock();
     if (context) lines.push(context);
@@ -348,10 +350,13 @@
       lines.push('Conversation:');
       for (const t of turns) lines.push(`Interviewer: ${t.text}`);
     }
+    const target = focus
+      ? `Answer this interviewer line: "${clip(focus)}".`
+      : 'The interviewer just spoke (the last Interviewer line).';
     lines.push(
       '',
-      'The interviewer just spoke (the last Interviewer line). Give the answer the candidate should say next. ' +
-        'If they asked for code or a system design, put only the spoken sentences before <<<SOLUTION>>> and the full solution after it.'
+      `${target} Give the answer the candidate should say next. ` +
+        'If they asked for code, an algorithm, or a system design, put only the spoken sentences before <<<SOLUTION>>> and the full solution after it.'
     );
     return lines.join('\n');
   }
@@ -500,6 +505,11 @@
     const l = live;
     live = null;
     clearInterval(l.timer);
+    if (!reconnecting && held) {
+      const h = takeHeld();
+      remember(h.text);
+      showSkipped(h.text, 'Live stopped');
+    }
     l.ears.forEach((e) => e.tap.stop());
     l.ctx.close().catch(() => {});
     l.system.stop();
@@ -580,6 +590,10 @@
       else if (segAge >= MAX_SEGMENT_MS && ear.speechMs > 0) cutEar(ear);
       else if (!ear.speaking && segAge >= IDLE_ROTATE_MS && now - ear.lastVoice >= silenceMs) cutEar(ear);
     }
+    if (held) {
+      if (anyVoice || processing) held.until = now + HOLD_MS;
+      else if (now >= held.until && !segmentQueue.length) releaseHeld();
+    }
     const phase = transcribing ? 'transcribing' : anyVoice ? 'speech' : 'idle';
     l.ticks = (l.ticks || 0) + 1;
     if (l.ticks % 2 === 0 || phase !== micState.phase) emit({ level: meterLevel(loud), phase });
@@ -599,10 +613,6 @@
     pump();
   }
 
-  function showTranscript(text) {
-    addMessage('user', escapeHtml(`🎧 ${text}`));
-  }
-
   function cleanErr(err) {
     return String(err && err.message ? err.message : err).replace(
       /^Error invoking remote method '[^']+': (Error: )?/,
@@ -616,7 +626,7 @@
     let deferred = null;
     const showDeferred = () => {
       if (!deferred) return;
-      showTranscript(deferred);
+      showSkipped(deferred, 'A newer line came in');
       deferred = null;
     };
     try {
@@ -633,17 +643,26 @@
         } finally {
           transcribing = false;
         }
-        const action = classify(transcript, item.force);
-        diag(`interviewer "${transcript.slice(0, 180)}" → ${action}`);
-        if (action === 'drop') continue;
-        remember(transcript);
-        if (action === 'answer') {
-          showDeferred();
-          deferred = transcript;
-        } else {
-          showDeferred();
-          showTranscript(transcript);
+        const first = classify(transcript, item.force);
+        if (first === 'drop') {
+          diag(`interviewer "${transcript.slice(0, 180)}" → drop`);
+          continue;
         }
+        const prev = takeHeld();
+        const text = prev ? `${prev.text} ${transcript}` : transcript;
+        let action = prev && first === 'check' ? classify(text, item.force) : first;
+        if (action === 'check') action = await gate(text);
+        if (action === 'wait' && (prev?.waits || 0) >= MAX_WAITS) action = 'answer';
+        diag(`interviewer "${text.slice(0, 180)}" → ${action}`);
+        if (action === 'wait') {
+          showDeferred();
+          holdLine(text, (prev?.waits || 0) + 1);
+          continue;
+        }
+        remember(text);
+        showDeferred();
+        if (action === 'answer') deferred = text;
+        else showSkipped(text);
       }
       // The suggestion prints on its own. Recognition is free to take the next phrase,
       // and a later question becomes the next suggestion instead of waiting in a pile.
@@ -672,39 +691,85 @@
     return NOISE.test(s);
   }
 
-  const PROMPT_START =
-    /^(what|why|how|when|where|who|which|whose|can|could|would|will|should|do|does|did|is|are|was|were|have|has|tell|explain|describe|walk|give|write|implement|design|compare|talk|share|define|list|name|solve|build|show|imagine|suppose|let's|lets|so,? (what|how|why|tell|can))\b/i;
-  // Interview asks that don't start with a question word ("Great. Now please introduce
-  // yourself", "Okay, so walk me through your project").
-  const ASKS =
-    /\b(tell (me|us)|introduce yourself|describe|explain|walk (me|us) through|what|why|how|which|can you|could you|would you|do you|did you|have you|are you|share|give (me|us)|talk (about|me)|your (experience|projects?|strengths?|weakness(es)?|role|background|skills|goals?))\b/i;
-  // Hindi / Hinglish asks, in Roman and Devanagari script ("aap apne baare mein batao",
-  // "आपका प्रोजेक्ट क्या था", "kya aap explain kar sakte ho").
-  const HINDI_ASKS =
-    /(^|[\s,.])(kya|kyu|kyun|kyon|kaise|kaisa|kaisi|kab|kahan|kaha|kaun|kon|kitna|kitne|kitni|konsa|kaunsa|batao|bataiye|bataye|samjhao|samjhaiye|sunao|dikhao|likho|baare mein|bare me|sakte ho|sakti ho|sakte hain|kijiye|kariye|karo|क्या|क्यों|कैसे|कैसा|कब|कहाँ|कहां|कौन|कितना|कितने|कौनसा|बताइए|बताइये|बताओ|बताएं|समझाइए|समझाओ|सुनाइए|बारे में|सकते हैं|सकते हो|कीजिए)(?=$|[\s,.?!।])/i;
-  // \b does not see Cyrillic, so Russian words are matched as whole tokens the same way Hindi is.
-  const RU_ASKS =
-    /(^|[\s,.(])(что|почему|зачем|как|какой|какая|какое|какие|когда|где|куда|откуда|кто|кого|сколько|чем|чего|расскажите|расскажи|объясните|объясни|опишите|опиши|представьтесь|назовите|скажите|уточните|уточни)(?=$|[\s,.?!…:;])/i;
-  function looksLikeQuestion(t) {
-    if (!t || !t.trim()) return false;
-    const text = t.trim();
-    if (/[?؟]/.test(text)) return true;
-    return PROMPT_START.test(text) || ASKS.test(text) || HINDI_ASKS.test(text) || RU_ASKS.test(text);
-  }
-  function looksLikePrompt(t) {
-    if (isNoise(t)) return false;
-    if (looksLikeQuestion(t)) return true;
-    const words = t.trim().split(/\s+/).filter(Boolean);
-    return words.length >= 10; // long statements from the interviewer are usually prompts
-  }
-
+  // A line that ends with a question mark is answered at once. Every other line goes to the
+  // gate: the model says answer, wait for the rest, or skip. No word lists, so a new verb
+  // ("составьте", "оцените") cannot slip through as a note.
   function classify(transcript, force) {
     const text = String(transcript || '').trim();
-    if (!text) return 'drop';
-    if (force) return isNoise(text) ? 'drop' : 'answer';
-    if (isNoise(text)) return 'drop';
-    return looksLikePrompt(text) ? 'answer' : 'note';
+    if (!text || isNoise(text)) return 'drop';
+    if (force) return 'answer';
+    if (/[?؟]["»”)]?\s*$/.test(text)) return 'answer';
+    return 'check';
   }
+
+  // The gate fails open: no key, an error or a slow reply means answer.
+  async function gate(line) {
+    try {
+      const before = conversation.turns.slice(-3).map((t) => t.text);
+      const verdict = await window.sobes.invoke('gate-turn', { line, before });
+      return verdict === 'wait' || verdict === 'skip' ? verdict : 'answer';
+    } catch (err) {
+      diag(`gate failed, answering: ${cleanErr(err)}`);
+      return 'answer';
+    }
+  }
+
+  // ---------- held line ("Waiting for the rest…") ----------
+  // A line cut off mid-sentence waits for the next one. Talking keeps it waiting.
+  // After HOLD_MS of quiet it is answered as it is.
+  const HOLD_MS = 5000;
+  const MAX_WAITS = 2;
+  let held = null; // { text, waits, until, el }
+
+  function holdLine(text, waits) {
+    const out = window.app.$('output');
+    out.querySelector('.hint')?.remove();
+    let el = held?.el;
+    if (!el || !el.isConnected) {
+      el = document.createElement('div');
+      el.className = 'msg user heard-pending';
+      out.appendChild(el);
+    }
+    el.innerHTML = `${escapeHtml(`🎧 ${text}`)}<span class="heard-note">Waiting for the rest…</span>`;
+    held = { text, waits, until: performance.now() + HOLD_MS, el };
+  }
+
+  function takeHeld() {
+    const h = held;
+    held = null;
+    if (h?.el) h.el.remove();
+    return h;
+  }
+
+  function releaseHeld() {
+    const h = takeHeld();
+    if (!h) return;
+    diag(`held line answered after quiet: "${h.text.slice(0, 120)}"`);
+    remember(h.text);
+    answer(h.text);
+  }
+
+  function showSkipped(text, why = 'No answer needed') {
+    const el = addMessage('user', escapeHtml(`🎧 ${text}`));
+    const note = document.createElement('span');
+    note.className = 'heard-note';
+    note.textContent = why;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'answer-line';
+    btn.textContent = 'Answer';
+    btn.dataset.line = text;
+    el.append(note, btn);
+  }
+
+  window.app.$('output').addEventListener('click', (e) => {
+    const btn = e.target.closest('.answer-line');
+    if (!btn) return;
+    const line = btn.dataset.line || '';
+    btn.closest('.msg')?.querySelector('.heard-note')?.remove();
+    btn.remove();
+    if (line) answer(line, line);
+  });
 
   window.sobes.on('audio-toggle-live', toggleLive);
 

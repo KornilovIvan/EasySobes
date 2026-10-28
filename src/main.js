@@ -384,8 +384,8 @@ const SCREEN_ASK =
 const DIALOGUE =
   'DIALOGUE: The user message includes what the interviewer said. ' +
   'Reply with the words the candidate should say next. ' +
-  'If that question asks them to write or fix code, or to design a system, put only the spoken sentences before <<<SOLUTION>>> ' +
-  'and the full solution after it.';
+  'If that question asks them to write or fix code, write an algorithm, or design a system — including "напишите алгоритм" — ' +
+  'put only the spoken sentences before <<<SOLUTION>>> and the full solution after it.';
 
 function buildMessages(userContent, settings, dialogue) {
   let content = systemPrompt(settings);
@@ -506,7 +506,12 @@ function friendlyError(status, body, groq = true) {
   return `API error ${status}: ${body.slice(0, 300)}`;
 }
 
-async function streamChat(userContent, model, dialogue, kind = 'text') {
+// A stalled socket used to sit until Node's 300s default. First byte: 20s.
+// After that, 15s with no new bytes means the stream died.
+const FIRST_BYTE_MS = 20000;
+const STREAM_IDLE_MS = 15000;
+
+async function streamChat(userContent, model, dialogue, kind = 'text', id = null) {
   const settings = currentSettings();
   const ep = endpoint(settings, kind);
   if (!ep.key) throw new Error(missingKey(kind));
@@ -516,9 +521,22 @@ async function streamChat(userContent, model, dialogue, kind = 'text') {
   const chatModel = model || (kind === 'vision' ? settings.visionModel : settings.chatModel);
   const roomy = needsCodeRoom(userContent);
   let maxTokens = maxTokensFor(settings, chatModel, roomy);
-  const post = () =>
-    fetch(url, {
+  const ctrl = new AbortController();
+  let timer = null;
+  const arm = (ms) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => ctrl.abort(), ms);
+  };
+  const disarm = () => clearTimeout(timer);
+  const send = (channel, data) => {
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send(channel, id == null ? data : { id, ...(channel === 'answer-chunk' ? { delta: data } : { text: data }) });
+  };
+  const post = () => {
+    arm(FIRST_BYTE_MS);
+    return fetch(url, {
       method: 'POST',
+      signal: ctrl.signal,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.key}` },
       body: JSON.stringify({
         model: chatModel,
@@ -531,58 +549,71 @@ async function streamChat(userContent, model, dialogue, kind = 'text') {
         ...providerOptions(chatModel, ep, roomy),
       }),
     });
+  };
 
-  // Free-tier per-minute limits. If only the answer budget is too big, shrink it and retry at
-  // once; otherwise wait out the window and retry, twice at most. A 429 that waiting can't fix
-  // ("Request too large") is reported straight away.
-  let res = await post();
-  let shrinks = 0;
-  let waits = 0;
-  while (res.status === 429) {
-    const body = await res.text();
-    const fits = shrinks < 2 ? outputBudgetLeft(body, maxTokens) : 0;
-    if (fits) {
-      shrinks++;
-      maxTokens = fits;
-      res = await post();
-      continue;
-    }
-    if (waits >= 2 || /request too large/i.test(body)) throw new Error(friendlyError(429, body, ep.groq));
-    waits++;
-    const wait = retryDelay(body);
-    const limitName = ep.groq ? 'Groq free limit' : 'Rate limit';
-    for (let left = Math.ceil(wait / 1000); left > 0; left--) {
-      win.webContents.send('answer-status', `${limitName} reached — retrying in ${left}s…`);
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-    win.webContents.send('answer-status', 'Retrying…');
-    res = await post();
-  }
-  if (!res.ok) throw new Error(friendlyError(res.status, await res.text(), ep.groq));
-
-  const decoder = new TextDecoder();
-  let buffer = '';
   let answer = '';
-  for await (const chunk of res.body) {
-    buffer += decoder.decode(chunk, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop();
-    for (const line of lines) {
-      const data = line.replace(/^data: /, '').trim();
-      if (!data || data === '[DONE]') continue;
-      try {
-        const delta = JSON.parse(data).choices?.[0]?.delta?.content;
-        if (delta) {
-          answer += delta;
-          win.webContents.send('answer-chunk', delta);
+  try {
+    // Free-tier per-minute limits. If only the answer budget is too big, shrink it and retry at
+    // once; otherwise wait out the window and retry, twice at most. A 429 that waiting can't fix
+    // ("Request too large") is reported straight away.
+    let res = await post();
+    let shrinks = 0;
+    let waits = 0;
+    while (res.status === 429) {
+      const body = await res.text();
+      const fits = shrinks < 2 ? outputBudgetLeft(body, maxTokens) : 0;
+      if (fits) {
+        shrinks++;
+        maxTokens = fits;
+        res = await post();
+        continue;
+      }
+      if (waits >= 2 || /request too large/i.test(body)) throw new Error(friendlyError(429, body, ep.groq));
+      waits++;
+      const wait = retryDelay(body);
+      disarm();
+      const limitName = ep.groq ? 'Groq free limit' : 'Rate limit';
+      for (let left = Math.ceil(wait / 1000); left > 0; left--) {
+        send('answer-status', `${limitName} reached — retrying in ${left}s…`);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      send('answer-status', 'Retrying…');
+      res = await post();
+    }
+    if (!res.ok) throw new Error(friendlyError(res.status, await res.text(), ep.groq));
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    arm(STREAM_IDLE_MS);
+    for await (const chunk of res.body) {
+      arm(STREAM_IDLE_MS);
+      buffer += decoder.decode(chunk, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        const data = line.replace(/^data: /, '').trim();
+        if (!data || data === '[DONE]') continue;
+        try {
+          const delta = JSON.parse(data).choices?.[0]?.delta?.content;
+          if (delta) {
+            answer += delta;
+            send('answer-chunk', delta);
+          }
+        } catch {
+          // partial or keep-alive line
         }
-      } catch {
-        // partial or keep-alive line
       }
     }
+    return answer;
+  } catch (err) {
+    if (ctrl.signal.aborted) {
+      logLine(`answer stalled after ${answer.length} chars`);
+      throw new Error(answer ? "Couldn't finish this answer" : "The answer didn't start in time. Try again.");
+    }
+    throw err;
+  } finally {
+    disarm();
   }
-
-  return answer;
 }
 
 function readAsk(payload) {
@@ -667,7 +698,8 @@ ipcMain.handle('fit-solution', (_e, open) => {
 ipcMain.handle('get-settings', () => currentSettings());
 ipcMain.handle('save-settings', (_e, settings) => saveSettings(settings));
 
-ipcMain.handle('ask', async (_e, payload) => streamChat(readAsk(payload), null, !!(payload && payload.dialogue)));
+ipcMain.handle('ask', async (_e, payload) =>
+  streamChat(readAsk(payload), null, !!(payload && payload.dialogue), 'text', payload && payload.id));
 
 // The ONLY path that sends the screen anywhere. It runs when the user asks (⌘⇧Return / 🖥).
 ipcMain.handle('ask-screen', async (_e, payload) => {
@@ -683,18 +715,20 @@ ipcMain.handle('ask-screen', async (_e, payload) => {
     ],
     settings.visionModel,
     !!(payload && payload.dialogue),
-    'vision'
+    'vision',
+    payload && payload.id
   );
 });
 
 // Fold older turns into a short memory so each answer stays inside the free-tier token budget.
-async function completeChat(messages, maxTokens) {
+async function completeChat(messages, maxTokens, timeoutMs = 0) {
   const settings = currentSettings();
   const ep = endpoint(settings, 'text');
   if (!ep.key) throw new Error(missingKey('text'));
   const chatModel = settings.chatModel;
   const res = await fetch(`${ep.url}/chat/completions`, {
     method: 'POST',
+    ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.key}` },
     body: JSON.stringify({
       model: chatModel,
@@ -734,10 +768,40 @@ ipcMain.handle('summarize-turns', async (_e, payload) => {
   );
 });
 
-ipcMain.handle('transcribe', async (_e, audioBuffer) => {
-  const settings = loadSettings();
-  const ep = endpoint(settings, 'speech');
-  if (!ep.key) throw new Error(missingKey('speech'));
+// One word per interviewer line: answer it, wait for the rest, or let it pass.
+// The renderer answers when this call fails or runs late, so a real question is not lost.
+const GATE_PROMPT =
+  'You watch a live job interview for the candidate. Read the LAST interviewer line and reply with one word.\n' +
+  'ANSWER: it asks the candidate something or gives a task: a question, a request to tell, explain, write, ' +
+  'implement, design, solve, compare or estimate. A command without a question mark counts ("Напишите алгоритм бинарного поиска").\n' +
+  'WAIT: the line clearly stops mid-sentence and the ask is still coming ("So walk me through a time you", "Давайте теперь").\n' +
+  'SKIP: greeting, small talk, thanks, acknowledgement, filler, or the interviewer describing the company, ' +
+  'the team or the plan with no ask in it.\n' +
+  'If unsure between ANSWER and SKIP, reply ANSWER. Reply with exactly one word: ANSWER, WAIT or SKIP.';
+
+ipcMain.handle('gate-turn', async (_e, payload) => {
+  const line = String(payload?.line || '').trim().slice(0, 1200);
+  if (!line) return 'skip';
+  const before = (Array.isArray(payload?.before) ? payload.before : [])
+    .slice(-3)
+    .map((t) => `Interviewer: ${String(t || '').trim().slice(0, 300)}`)
+    .join('\n');
+  const user = `${before ? `Earlier lines:\n${before}\n\n` : ''}LAST interviewer line:\n${line}`;
+  const reply = await completeChat(
+    [
+      { role: 'system', content: GATE_PROMPT },
+      { role: 'user', content: user },
+    ],
+    600,
+    3500
+  );
+  const m = /\b(ANSWER|WAIT|SKIP)\b/i.exec(reply);
+  return m ? m[1].toLowerCase() : 'answer';
+});
+
+const SPEECH_MS = 20000;
+
+function speechForm(settings, ep, audioBuffer) {
   const form = new FormData();
   // The renderer sends 16 kHz WAV (it no longer uses MediaRecorder); keep webm as a fallback.
   const isWav = Buffer.from(audioBuffer.slice(0, 4)).toString('ascii') === 'RIFF';
@@ -766,13 +830,45 @@ ipcMain.handle('transcribe', async (_e, audioBuffer) => {
     form.append('language', 'hi');
     form.append('prompt', 'इंटरव्यू। अपने बारे में बताइए। आपका प्रोजेक्ट क्या था?');
   } else form.append('prompt', AUTO_HINT);
-  const res = await fetch(`${ep.url}/audio/transcriptions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${ep.key}` },
-    body: form,
-  });
+  return form;
+}
+
+function speechRetriable(err) {
+  const name = err && err.name;
+  if (name === 'TimeoutError' || name === 'AbortError' || name === 'TypeError') return true;
+  return /API error 5\d\d/.test(String(err && err.message));
+}
+
+async function transcribeOnce(settings, ep, audioBuffer) {
+  let res;
+  try {
+    res = await fetch(`${ep.url}/audio/transcriptions`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(SPEECH_MS),
+      headers: { Authorization: `Bearer ${ep.key}` },
+      body: speechForm(settings, ep, audioBuffer),
+    });
+  } catch (err) {
+    if (err && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw Object.assign(new Error('Speech recognition timed out.'), { name: 'TimeoutError' });
+    }
+    throw err;
+  }
   if (!res.ok) throw new Error(friendlyError(res.status, await res.text(), ep.groq));
-  return (await res.json()).text;
+  return (await res.json()).text || '';
+}
+
+ipcMain.handle('transcribe', async (_e, audioBuffer) => {
+  const settings = loadSettings();
+  const ep = endpoint(settings, 'speech');
+  if (!ep.key) throw new Error(missingKey('speech'));
+  try {
+    return await transcribeOnce(settings, ep, audioBuffer);
+  } catch (err) {
+    if (!speechRetriable(err)) throw err;
+    logLine(`speech: retry after ${err.message}`);
+    return transcribeOnce(settings, ep, audioBuffer);
+  }
 });
 
 ipcMain.on('hide', () => win.hide());

@@ -7,7 +7,8 @@ const BASE =
   'LANGUAGE: plain, simple words that a non-native speaker can read aloud easily. Short sentences, everyday words, ' +
   'no fancy vocabulary or buzzwords. If a technical term is needed, explain it in a few simple words.\n' +
   'CHOOSE THE SHAPE FROM THE QUESTION. Do not wait for a mode switch.\n' +
-  '- If they ask you to write, implement, fix, complete or debug code, or to design a system, answer in two parts. ' +
+  '- If they ask you to write, implement, fix, complete, debug, or code something — an algorithm, a function, a class, or a program — or to design a system, answer in two parts. ' +
+  'This includes "write binary search", "напишите алгоритм", "реализуйте", "исправьте код", and the same words without -те. ' +
   'First, two or three short spoken sentences the candidate can say aloud. No headings, no bullets, no code fences in those sentences.\n' +
   'Then a line by itself that is exactly <<<SOLUTION>>>.\n' +
   'After that line, write the solution they can glance at. For code, one complete fenced block with a language tag. ' +
@@ -28,8 +29,8 @@ const BASE =
   '- Spoken sentences must read smoothly if said aloud in one breath each. A full program or a system design goes after <<<SOLUTION>>>, not inside the spoken sentences.\n' +
   'Behavioral questions ("tell me about a time…", conflict, failure, leadership): follow STAR inside the sentences — ' +
   'situation, what you had to do, what you did, and the result — ending with a concrete, ideally quantified result. ' +
-  'Technical/concept questions: say the direct answer first, then one short example or trade-off, still as spoken sentences, ' +
-  'plus a short code example only when it helps. ' +
+  'Technical/concept questions ("what is binary search", "how does a hash map work"): say the direct answer first, then one short example or trade-off, still as spoken sentences, ' +
+  'plus a short code example only when it helps. Asking to write the algorithm is the coding task above, not this case. ' +
   'Ground answers in the user\'s background below; do not invent employers, titles or credentials that are not in it — ' +
   'if nothing fits, keep the example plausible and generic. ' +
   'Never use the headings Approach, Complexity or Edge cases.';
@@ -49,7 +50,7 @@ const LANGUAGE_PROMPTS = {
     'Use short sentences that can be read aloud in one breath. No clerical or essay words (таким образом, следовательно, в заключение, осуществляет, является). ' +
     'Do not start every answer with the same word. Say numbers the way people speak them («примерно два года», «процентов на двадцать быстрее»). ' +
     'Keep technical terms as they are said aloud (API, React, Docker). ' +
-    'When the question asks for code or a system design, keep the short spoken plan in Russian, then a line <<<SOLUTION>>>, then the code or design.',
+    'When they ask to write code, an algorithm, a function, or a system design (напишите, реализуйте, исправьте, спроектируйте, and the same words without -те), keep the short spoken plan in Russian, then a line <<<SOLUTION>>>, then the code or design.',
   hi:
     'The conversation is in Hindi; the transcript may be in Devanagari or Urdu script. Reply in simple, everyday spoken Hindi ' +
     'written in Devanagari. Keep technical words in English (React, API, database).',
