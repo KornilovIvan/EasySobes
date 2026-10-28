@@ -381,7 +381,6 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .settings-group { margin: 10px 0 0; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .settings label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--text-2); }
 .settings label input, .settings label select, .settings label textarea { font-weight: 400; font-size: 13px; }
-.settings label button { align-self: flex-start; margin: 2px 0 4px; font-weight: 500; }
 .settings label.check { flex-direction: row; align-items: center; gap: 7px; font-weight: 500; }
 .settings .row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
 .settings .row .row-label { font-weight: 600; }

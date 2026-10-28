@@ -13,7 +13,6 @@ const SETTING_KEYS = [
   'visionModel',
   'sttModel',
   'language',
-  'context',
   'contextLimit',
 ];
 // Hotkey labels are written Mac-style (⌘⇧R). On Windows/Linux, rewrite every label to Ctrl+Shift+R,
@@ -829,17 +828,6 @@ $('btn-screen').onclick = () => askScreen();
 $('btn-settings').onclick = openSettings;
 $('btn-settings-back').onclick = () => closeSettings();
 $('btn-save').onclick = saveSettings;
-$('btn-resume').onclick = async () => {
-  try {
-    const res = await window.sobes.invoke('pick-resume');
-    if (!res) return;
-    $('s-context').value = res.text;
-    await window.sobes.saveSettings({ context: res.text });
-    setStatus(`Resume loaded: ${res.name}${res.truncated ? ' (trimmed)' : ''}`);
-  } catch (err) {
-    addMessage('error', escapeHtml(`Resume: ${err.message.replace(/^Error invoking remote method '[^']+': /, '')}`));
-  }
-};
 $('btn-check-hidden').onclick = checkHidden;
 $('btn-hide').onclick = () => window.sobes.hide();
 $('btn-chat-new').onclick = newChat;

@@ -5,7 +5,6 @@ const {
   ipcMain,
   desktopCapturer,
   screen,
-  dialog,
   nativeImage,
   systemPreferences,
 } = require('electron');
@@ -16,8 +15,6 @@ const { execFile } = require('child_process');
 const { systemPrompt } = require('./prompts');
 const setupAudio = require('./audio-main');
 const setupStealth = require('./stealth');
-const { readResume, EXTENSIONS } = require('./resume');
-
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const DEFAULT_SETTINGS = {
   // Older builds stored one URL and one key for everything. Those two fields remain the
@@ -93,6 +90,11 @@ function loadSettings() {
     if (isGroqUrl(merged.textBaseUrl) && !saved.chatUpgraded && saved.chatModel === PREVIOUS_CHAT_MODEL) {
       merged.chatModel = DEFAULT_SETTINGS.chatModel;
       merged.chatUpgraded = true;
+      dirty = true;
+    }
+    // The settings resume field is gone. Per-chat context is the only note that goes out.
+    if (String(merged.context || '').trim()) {
+      merged.context = '';
       dirty = true;
     }
     // Chats and the shrink-to-bar height are gone.
@@ -387,10 +389,8 @@ const DIALOGUE =
   'If the note says the interviewer just spoke, reply with the words the candidate should say next. ' +
   'If that question asks them to write or fix code, add the code after one or two spoken sentences.';
 
-// A screen question drops the resume: the image is the expensive part.
 function buildMessages(userContent, settings, dialogue) {
-  const hasImage = Array.isArray(userContent);
-  let content = systemPrompt(hasImage ? { ...settings, context: '' } : settings);
+  let content = systemPrompt(settings);
   if (dialogue) content += `\n\n${DIALOGUE}`;
   return [
     { role: 'system', content },
@@ -640,19 +640,6 @@ ipcMain.handle('chats-save', (_e, data) => saveChats(data));
 
 ipcMain.handle('get-settings', () => currentSettings());
 ipcMain.handle('save-settings', (_e, settings) => saveSettings(settings));
-
-ipcMain.handle('pick-resume', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
-    title: 'Choose your resume',
-    properties: ['openFile'],
-    filters: [
-      { name: 'Resume', extensions: EXTENSIONS },
-      { name: 'All files', extensions: ['*'] },
-    ],
-  });
-  if (canceled || !filePaths.length) return null;
-  return readResume(filePaths[0]);
-});
 
 ipcMain.handle('ask', async (_e, payload) => streamChat(readAsk(payload), null, !!(payload && payload.dialogue)));
 

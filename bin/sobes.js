@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The `sobes` command.
 //   sobes           start the overlay (runs setup first if there is no API key yet)
-//   sobes setup     change the API key, profile or resume
+//   sobes setup     change the API key or profile
 //   sobes update    get the latest version
 //   sobes help      show this list
 const { spawn, spawnSync } = require('child_process');
@@ -77,7 +77,7 @@ function help() {
   console.log(`EasySobes ${pkg.version}
 
   sobes           start EasySobes
-  sobes setup     change your API key, profile or resume
+  sobes setup     change your API key or profile
   sobes update    get the latest version
   sobes help      show this list
 

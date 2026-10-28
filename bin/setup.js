@@ -1,10 +1,9 @@
-// `sobes setup`: a terminal wizard that asks for the Groq key, a short profile and the resume,
+// `sobes setup`: a terminal wizard that asks for the Groq key and a short profile,
 // then saves them to the same settings.json the app reads (merged, never overwritten).
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const readline = require('readline');
-const { readResume } = require('../src/resume');
 
 const GROQ_URL = 'https://api.groq.com/openai/v1';
 
@@ -51,15 +50,6 @@ async function checkKey(baseUrl, key) {
   }
 }
 
-// A dragged-in file arrives quoted ("C:\a b.pdf", 'a b.pdf'), escaped (a\ b.pdf) or as & 'x' (PowerShell).
-function cleanPath(input) {
-  let p = input.trim().replace(/^&\s+/, '');
-  if (/^(['"]).*\1$/.test(p)) p = p.slice(1, -1);
-  else if (process.platform !== 'win32') p = p.replace(/\\(.)/g, '$1');
-  if (p.startsWith('~')) p = path.join(os.homedir(), p.slice(1));
-  return p;
-}
-
 const bold = (s) => (process.stdout.isTTY ? `\x1b[1m${s}\x1b[0m` : s);
 const green = (s) => (process.stdout.isTTY ? `\x1b[32m${s}\x1b[0m` : s);
 const red = (s) => (process.stdout.isTTY ? `\x1b[31m${s}\x1b[0m` : s);
@@ -68,7 +58,7 @@ const dim = (s) => (process.stdout.isTTY ? `\x1b[2m${s}\x1b[0m` : s);
 async function runSetup({ ifNeeded = false } = {}) {
   const current = loadSettings();
   if (ifNeeded && current.apiKey) {
-    console.log(`Keeping your saved key and resume. Run ${bold('sobes setup')} any time to change them.`);
+    console.log(`Keeping your saved key. Run ${bold('sobes setup')} any time to change it.`);
     return true;
   }
 
@@ -164,29 +154,6 @@ async function runSetup({ ifNeeded = false } = {}) {
     notes: await ask('Anything else EasySobes should know? (optional)', p.notes),
   };
 
-  // 3. Resume
-  console.log(`\n${bold('Resume')} ${dim('— PDF or Word (.docx)')}`);
-  const hasResume = String(current.context || '').trim().length > 0;
-  let context = current.context || '';
-  for (;;) {
-    const answer = await ask(
-      hasResume
-        ? 'Drag your resume into this window and press Enter (Enter alone keeps your current one)'
-        : 'Drag your resume into this window and press Enter (Enter alone skips)'
-    );
-    if (!answer) break;
-    const file = cleanPath(answer);
-    try {
-      if (!fs.existsSync(file)) throw new Error(`File not found: ${file}`);
-      const res = await readResume(file);
-      context = res.text;
-      console.log(green(`✔ Read ${res.name} (${res.text.length.toLocaleString()} characters${res.truncated ? ', trimmed to fit' : ''})`));
-      break;
-    } catch (err) {
-      console.log(red(`✖ ${err.message}`));
-      if (noInputLeft()) break;
-    }
-  }
   rl.close();
 
   if (!apiKey) {
@@ -195,7 +162,7 @@ async function runSetup({ ifNeeded = false } = {}) {
   }
   // A channel that already points somewhere else (for example text on DeepSeek) keeps its own key.
   const previous = current.apiKey || '';
-  const patch = { apiKey, baseUrl, profile, context };
+  const patch = { apiKey, baseUrl, profile, context: '' };
   for (const kind of ['speech', 'text', 'vision']) {
     const ownKey = current[`${kind}ApiKey`] || '';
     const ownUrl = current[`${kind}BaseUrl`] || '';

@@ -1,5 +1,5 @@
-// Reads a resume file into plain text. Used by the ⚙ "Load resume" button (main.js)
-// and by the `sobes setup` terminal wizard, so it must not require('electron').
+// Reads a PDF or Word file into plain text. Nothing in the overlay calls this.
+// It must not require('electron').
 //
 // PDF: unpdf (pure JS, works on macOS and Windows), with macOS PDFKit as a fallback.
 // DOCX: unzipped with Node's zlib, no extra dependency.
