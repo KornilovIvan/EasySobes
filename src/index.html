@@ -98,6 +98,13 @@
       <button id="btn-save" class="primary">Save</button>
     </section>
 
+    <div class="stage" id="stage" data-tab="talk">
+      <div class="stage-tabs no-drag" id="stage-tabs">
+        <button type="button" data-tab="talk" class="on">Talk</button>
+        <button type="button" data-tab="solution">Solution</button>
+      </div>
+      <div class="stage-body">
+        <div class="stage-talk">
     <main id="output" class="output no-drag">
       <div class="hint">
         <div class="hint-title">Ready when you are</div>
@@ -112,6 +119,18 @@
         </dl>
       </div>
     </main>
+        </div>
+        <aside id="artifact" class="artifact no-drag">
+          <div class="artifact-bar">
+            <span>Solution</span>
+            <span class="spacer"></span>
+            <button id="artifact-copy" type="button" title="Copy solution">Copy</button>
+            <button id="artifact-close" type="button" aria-label="Hide solution">×</button>
+          </div>
+          <div id="artifact-body" class="artifact-body"></div>
+        </aside>
+      </div>
+    </div>
 
     <footer class="no-drag">
       <button id="btn-live" class="ctl" title="Live listen, auto-answer (⌘⇧L)"><span class="ic">◉</span><span class="lbl">Live</span></button>

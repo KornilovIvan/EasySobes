@@ -384,7 +384,8 @@ const SCREEN_ASK =
 const DIALOGUE =
   'DIALOGUE: The user message includes what the interviewer said. ' +
   'Reply with the words the candidate should say next. ' +
-  'If that question asks them to write or fix code, add the code after one or two spoken sentences.';
+  'If that question asks them to write or fix code, or to design a system, put only the spoken sentences before <<<SOLUTION>>> ' +
+  'and the full solution after it.';
 
 function buildMessages(userContent, settings, dialogue) {
   let content = systemPrompt(settings);
@@ -420,7 +421,7 @@ function needsCodeRoom(userContent) {
       : '';
   // Only the latest ask counts. An older coding question must not enlarge every later reply.
   const tail = text.slice(-800);
-  return /\b(write|implement|debug)\b.{0,48}\b(function|class|method|program|algorithm|solution|code)\b|\b(leetcode|coding (problem|task|question))\b|напиш\p{L}{0,6}\s+(код|функц|класс|программ|алгоритм)|реализуй|реализуйте|исправ\p{L}{0,4}\s+код/iu.test(
+  return /\b(write|implement|debug)\b.{0,48}\b(function|class|method|program|algorithm|solution|code)\b|\b(leetcode|coding (problem|task|question)|system design)\b|\bdesign( a| the)? (system|service|architecture)\b|напиш\p{L}{0,6}\s+(код|функц|класс|программ|алгоритм)|реализуй|реализуйте|исправ\p{L}{0,4}\s+код|спроектир/iu.test(
     tail
   );
 }
@@ -637,6 +638,31 @@ function saveChats(data) {
 
 ipcMain.handle('chats-load', () => loadChats());
 ipcMain.handle('chats-save', (_e, data) => saveChats(data));
+
+// Widen the overlay while a code or design solution is on screen, then put the old size back.
+let solutionWindow = null;
+ipcMain.handle('fit-solution', (_e, open) => {
+  if (!win) return;
+  const bounds = win.getBounds();
+  if (open) {
+    if (solutionWindow || bounds.width >= 1040) return;
+    const work = screen.getPrimaryDisplay().workArea;
+    const next = Math.min(1120, work.width - 24);
+    if (next < bounds.width + 80) return;
+    solutionWindow = { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, target: next };
+    const x = Math.max(work.x, Math.min(bounds.x + bounds.width - next, work.x + work.width - next));
+    win.setBounds({ x, y: bounds.y, width: next, height: bounds.height });
+    return;
+  }
+  if (!solutionWindow) return;
+  const now = win.getBounds();
+  const prev = solutionWindow;
+  solutionWindow = null;
+  if (Math.abs(now.width - prev.target) > 48) return;
+  const work = screen.getPrimaryDisplay().workArea;
+  const x = Math.max(work.x, Math.min(prev.x, work.x + work.width - prev.width));
+  win.setBounds({ x, y: now.y, width: prev.width, height: now.height });
+});
 
 ipcMain.handle('get-settings', () => currentSettings());
 ipcMain.handle('save-settings', (_e, settings) => saveSettings(settings));

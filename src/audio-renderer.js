@@ -259,7 +259,8 @@
   // Interviewer lines are kept for this sitting. Clear (⌘⇧K) drops them. Older lines are
   // compressed so a long interview still fits in the free-tier token budget.
 
-  // The last 10 lines go with every answer. Anything older is folded into a short summary.
+  // After a summary succeeds, only the latest 10 lines stay in full.
+  // Until that summary is stored, every line still goes with the answer.
   const KEEP_RAW = 10;
   const SUMMARIZE_AT = 10;
   const conversation = { turns: [], summary: '' };
@@ -315,8 +316,7 @@
   }
 
   function turnsForModel() {
-    const from = conversation.turns.length > KEEP_RAW ? conversation.turns.length - KEEP_RAW : 0;
-    return conversation.turns.slice(from).map((t) => ({ role: t.role, text: clip(t.text) }));
+    return conversation.turns.map((t) => ({ role: t.role, text: clip(t.text) }));
   }
 
   function contextBlock() {
@@ -351,7 +351,7 @@
     lines.push(
       '',
       'The interviewer just spoke (the last Interviewer line). Give the answer the candidate should say next. ' +
-        'If they asked for code, add it after one or two spoken sentences.'
+        'If they asked for code or a system design, put only the spoken sentences before <<<SOLUTION>>> and the full solution after it.'
     );
     return lines.join('\n');
   }

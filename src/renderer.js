@@ -38,6 +38,39 @@ if (!navigator.userAgent.includes('Macintosh')) {
 let busy = false;
 let currentBot = null;
 let currentText = '';
+let shownSolution = '';
+let solutionDismissed = false;
+const solutionByMsg = new WeakMap();
+
+// The model puts words to say before this line, and code or a design after it.
+const SOLUTION_MARK = '<<<SOLUTION>>>';
+
+function splitAnswer(raw) {
+  const text = String(raw || '');
+  const at = text.indexOf(SOLUTION_MARK);
+  if (at >= 0) {
+    return {
+      say: text.slice(0, at).trim(),
+      solution: text.slice(at + SOLUTION_MARK.length).replace(/^\s*\n/, ''),
+    };
+  }
+  return { say: stripPartialMark(text).trimEnd(), solution: '' };
+}
+
+function stripPartialMark(text) {
+  const heads = [SOLUTION_MARK, `\n${SOLUTION_MARK}`];
+  let cut = 0;
+  for (const head of heads) {
+    const max = Math.min(head.length - 1, text.length);
+    for (let n = max; n >= 3; n--) {
+      if (text.endsWith(head.slice(0, n))) {
+        cut = Math.max(cut, n);
+        break;
+      }
+    }
+  }
+  return cut ? text.slice(0, -cut) : text;
+}
 
 // Notices that used to sit in the header. The speech line stays put; the hint line
 // shows the notice, then returns. A "busy" notice stays until the work finishes.
@@ -255,12 +288,21 @@ const rawAnswers = new WeakMap(); // bot message element -> raw markdown
 
 function finalizeBot(msg, text) {
   rawAnswers.set(msg, text);
+  const parts = splitAnswer(text);
+  if (parts.solution) solutionByMsg.set(msg, parts.solution);
   if (!restoring) rememberVisible('bot', text);
   const btn = document.createElement('button');
   btn.className = 'copy-btn copy-msg';
   btn.title = 'Copy answer (markdown)';
   btn.textContent = '⧉';
   msg.prepend(btn);
+  if (parts.solution && !msg.querySelector('.open-solution')) {
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'open-solution';
+    open.textContent = 'Solution';
+    msg.appendChild(open);
+  }
 }
 
 async function copyText(text) {
@@ -277,12 +319,93 @@ async function copyText(text) {
   }
 }
 
-output.addEventListener('click', async (e) => {
+const stage = $('stage');
+
+function setTab(name) {
+  stage.dataset.tab = name;
+  stage.querySelectorAll('.stage-tabs button').forEach((btn) => {
+    btn.classList.toggle('on', btn.dataset.tab === name);
+  });
+}
+
+function showSolution(markdown, opts = {}) {
+  shownSolution = markdown;
+  $('artifact-body').innerHTML = renderMarkdown(markdown);
+  if (opts.force) solutionDismissed = false;
+  if (solutionDismissed) return;
+  const opening = !stage.classList.contains('has-solution');
+  stage.classList.add('has-solution');
+  if (opening) window.sobes.invoke('fit-solution', true).catch(() => {});
+}
+
+function clearSolution() {
+  shownSolution = '';
+  solutionDismissed = false;
+  $('artifact-body').innerHTML = '';
+  stage.classList.remove('has-solution');
+  setTab('talk');
+  window.sobes.invoke('fit-solution', false).catch(() => {});
+}
+
+function paintLive(raw) {
+  if (!currentBot) return;
+  const parts = splitAnswer(raw);
+  currentBot.innerHTML = parts.say
+    ? renderMarkdown(parts.say)
+    : parts.solution
+      ? '<p>The solution is in the panel.</p>'
+      : '<span class="dots"><i></i><i></i><i></i></span>';
+  if (parts.solution) showSolution(parts.solution);
+  if (followQuestion) pinLatestQuestion();
+}
+
+new ResizeObserver(() => {
+  stage.classList.toggle('narrow', stage.clientWidth < 680);
+}).observe(stage);
+
+$('stage-tabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (btn?.dataset.tab) setTab(btn.dataset.tab);
+});
+
+$('artifact-close').addEventListener('click', () => {
+  solutionDismissed = true;
+  stage.classList.remove('has-solution');
+  setTab('talk');
+  window.sobes.invoke('fit-solution', false).catch(() => {});
+});
+
+$('artifact-copy').addEventListener('click', async () => {
+  const btn = $('artifact-copy');
+  try {
+    await copyText(shownSolution);
+    btn.textContent = 'Copied';
+    setTimeout(() => {
+      btn.textContent = 'Copy';
+    }, 1200);
+  } catch {
+    setStatus('Copy failed');
+  }
+});
+
+stage.addEventListener('click', async (e) => {
+  const open = e.target.closest('.open-solution');
+  if (open) {
+    const sol = solutionByMsg.get(open.closest('.msg'));
+    if (!sol) return;
+    showSolution(sol, { force: true });
+    if (stage.classList.contains('narrow')) setTab('solution');
+    return;
+  }
   const btn = e.target.closest('.copy-btn');
   if (!btn) return;
+  const raw = rawAnswers.get(btn.closest('.msg')) || '';
+  const parts = splitAnswer(raw);
   const text = btn.classList.contains('copy-code')
     ? btn.closest('.code-wrap').querySelector('code').textContent
-    : rawAnswers.get(btn.closest('.msg')) || '';
+    : parts.solution
+      ? parts.say
+      : raw;
   try {
     await copyText(text);
     btn.textContent = '✓';
@@ -304,21 +427,27 @@ window.sobes.on('answer-status', (text) => {
 window.sobes.on('answer-chunk', (delta) => {
   if (!currentBot) return;
   currentText += delta;
-  currentBot.innerHTML = renderMarkdown(currentText);
-  if (followQuestion) pinLatestQuestion();
+  paintLive(currentText);
 });
 
-// A request that arrives mid-answer (e.g. ⌘⇧Return while a live answer streams) waits its
-// turn instead of being dropped.
+// A request that arrives mid-answer waits its turn. Three can wait.
+// A fourth is shown in the chat and is not described as queued.
 const queue = [];
 async function run(label, fn) {
   if (busy) {
-    if (queue.length < 3) queue.push([label, fn]);
-    setStatus('Queued — answering after this one', 'busy');
+    if (queue.length < 3) {
+      queue.push([label, fn]);
+      setStatus('Queued — answering after this one', 'busy');
+    } else {
+      const note = 'Not queued — three questions are already waiting';
+      addMessage('error', escapeHtml(label ? `${note}: ${label}` : note));
+      setStatus(note, 'busy');
+    }
     return;
   }
   busy = true;
   setStatus('Thinking…', 'busy');
+  solutionDismissed = false;
   if (label) addMessage('user', escapeHtml(label));
   currentText = '';
   const msg = addMessage('bot streaming', '<div class="md"><span class="dots"><i></i><i></i><i></i></span></div>');
@@ -327,14 +456,15 @@ async function run(label, fn) {
     const answer = await fn();
     if (!currentText && typeof answer === 'string' && answer) {
       currentText = answer;
-      currentBot.innerHTML = renderMarkdown(answer);
-      if (followQuestion) pinLatestQuestion();
+      paintLive(answer);
     }
     if (currentText) finalizeBot(msg, currentText);
+    if (!splitAnswer(currentText).solution) clearSolution();
     msg.classList.remove('streaming');
     setStatus('');
   } catch (err) {
     msg.remove();
+    clearSolution();
     addMessage('error', escapeHtml(String(err.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')));
     window.sobes.send('log', `run failed: ${err && err.stack ? err.stack : err}`);
     setStatus('');
@@ -368,6 +498,7 @@ function askScreen() {
 
 function clearAll() {
   output.innerHTML = hintHTML;
+  clearSolution();
   setStatus('');
   if (activeChat) {
     activeChat.messages = [];
@@ -544,15 +675,22 @@ function renderChatList() {
 
 function paintChat(chat) {
   restoring = true;
+  solutionDismissed = false;
   output.innerHTML = '';
   if (!chat.messages.length) output.innerHTML = hintHTML;
+  let lastSolution = '';
   for (const m of chat.messages) {
     if (m.kind === 'bot') {
-      const el = addMessage('bot', `<div class="md">${renderMarkdown(m.text)}</div>`);
+      const parts = splitAnswer(m.text);
+      const spoken = parts.say || (parts.solution ? 'The solution is in the panel.' : m.text);
+      const el = addMessage('bot', `<div class="md">${renderMarkdown(spoken)}</div>`);
       finalizeBot(el, m.text);
+      if (parts.solution) lastSolution = parts.solution;
     } else if (m.kind === 'error') addMessage('error', escapeHtml(m.text));
     else addMessage('user', escapeHtml(m.text));
   }
+  if (lastSolution) showSolution(lastSolution);
+  else clearSolution();
   restoring = false;
   followQuestion = false;
   pinLatestQuestion();

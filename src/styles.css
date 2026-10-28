@@ -372,7 +372,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   border-top: 1px solid var(--line);
   overflow-y: auto;
 }
-.panel:has(.settings:not(.hidden)) .output,
+.panel:has(.settings:not(.hidden)) .stage,
 .panel:has(.settings:not(.hidden)) footer { display: none; }
 .settings-back { display: flex; }
 .settings-back button { align-self: flex-start; padding: 6px 12px; font-weight: 650; }
@@ -386,17 +386,79 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .settings .row .row-label { font-weight: 600; }
 .settings .row .spacer { flex: 1; }
 .font-val { min-width: 34px; text-align: center; color: var(--text-2); font-variant-numeric: tabular-nums; }
-.settings::-webkit-scrollbar, .output::-webkit-scrollbar { width: 8px; }
-.settings::-webkit-scrollbar-thumb, .output::-webkit-scrollbar-thumb {
+.settings::-webkit-scrollbar, .output::-webkit-scrollbar, .artifact-body::-webkit-scrollbar { width: 8px; }
+.settings::-webkit-scrollbar-thumb, .output::-webkit-scrollbar-thumb, .artifact-body::-webkit-scrollbar-thumb {
   background: var(--thumb); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box;
 }
-.settings::-webkit-scrollbar-thumb:hover, .output::-webkit-scrollbar-thumb:hover { background-color: var(--thumb-hover); }
+.settings::-webkit-scrollbar-thumb:hover, .output::-webkit-scrollbar-thumb:hover, .artifact-body::-webkit-scrollbar-thumb:hover { background-color: var(--thumb-hover); }
+
+.stage { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.stage-tabs { display: none; gap: 4px; padding: 6px 10px 0; }
+.stage-tabs button { background: transparent; color: var(--text-2); }
+.stage-tabs button.on { color: var(--text); border-color: var(--line-2); }
+.stage.narrow.has-solution .stage-tabs { display: flex; }
+.stage-body { flex: 1; min-height: 0; display: flex; }
+.stage-talk { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.stage.narrow.has-solution[data-tab="solution"] .stage-talk { display: none; }
+.artifact {
+  display: none;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  background: var(--sunken);
+}
+.stage.has-solution .artifact { display: flex; }
+.stage.narrow .artifact { border-left: 0; }
+.stage.narrow.has-solution[data-tab="talk"] .artifact { display: none; }
+.artifact-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--line);
+}
+.artifact-bar .spacer { flex: 1; }
+.artifact-bar button { padding: 3px 8px; }
+.artifact-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px 14px; font-size: var(--fs, 16px); }
+.artifact-body p { margin: 6px 0; }
+.artifact-body p:first-child { margin-top: 0; }
+.artifact-body ul, .artifact-body ol { padding-left: 20px; margin: 6px 0; }
+.artifact-body li { margin: 3px 0; }
+.artifact-body .h { font-weight: 700; margin: 12px 0 4px; }
+.artifact-body code {
+  font-family: var(--mono);
+  font-size: 0.84em;
+  color: var(--code-fg);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+.artifact-body pre {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  padding: 12px;
+  border-radius: 10px;
+  overflow-x: auto;
+  margin: 0;
+  line-height: 1.55;
+}
+.artifact-body pre code { background: none; border: 0; padding: 0; font-size: 0.82em; color: var(--code-fg); }
+
+.msg .open-solution { margin-top: 8px; font-size: 11.5px; }
 
 /* ---------- Output ----------
    No CSS smooth scrolling. A new question is aligned to the top once; streaming must not move it. */
 .output {
   position: relative;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 6px 14px 14px;
   user-select: text;
