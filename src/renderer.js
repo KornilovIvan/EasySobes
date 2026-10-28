@@ -224,7 +224,6 @@ function renderMarkdown(md) {
       return (
         '<div class="code-wrap">' +
         (lang ? `<span class="code-lang">${escapeHtml(lang)}</span>` : '') +
-        '<button class="copy-btn copy-code" title="Copy code">⧉</button>' +
         `<pre><code>${escapeHtml(code)}</code></pre></div>`
       );
     })
@@ -275,48 +274,42 @@ function addMessage(cls, html) {
   output.querySelector('.hint')?.remove();
   const el = document.createElement('div');
   el.className = `msg ${cls}`;
-  el.innerHTML = html;
+  const talk = cls.includes('user') || cls.includes('bot');
+  if (talk) {
+    el.classList.add('talk');
+    const mark = document.createElement('span');
+    mark.className = cls.includes('user') ? 'qa q' : 'qa a';
+    mark.textContent = cls.includes('user') ? 'Q:' : 'A:';
+    const body = document.createElement('div');
+    body.className = 'qa-body';
+    body.innerHTML = html;
+    el.append(mark, body);
+  } else {
+    el.innerHTML = html;
+  }
   output.appendChild(el);
   if (!restoring && (cls.includes('user') || cls.includes('bot'))) {
     followQuestion = true;
     pinLatestQuestion();
   }
-  if (!restoring && (cls.includes('user') || cls.includes('error'))) rememberVisible(cls.includes('error') ? 'error' : 'user', el.textContent);
+  if (!restoring && (cls.includes('user') || cls.includes('error'))) {
+    const body = el.querySelector('.qa-body');
+    rememberVisible(cls.includes('error') ? 'error' : 'user', (body || el).textContent);
+  }
   return el;
 }
 
-const rawAnswers = new WeakMap(); // bot message element -> raw markdown
-
 function finalizeBot(msg, text) {
-  rawAnswers.set(msg, text);
   const parts = splitAnswer(text);
   if (parts.solution) solutionByMsg.set(msg, parts.solution);
   if (!restoring) rememberVisible('bot', text);
-  const btn = document.createElement('button');
-  btn.className = 'copy-btn copy-msg';
-  btn.title = 'Copy answer (markdown)';
-  btn.textContent = '⧉';
-  msg.prepend(btn);
-  if (parts.solution && !msg.querySelector('.open-solution')) {
+  const host = msg.querySelector('.qa-body') || msg;
+  if (parts.solution && !host.querySelector('.open-solution')) {
     const open = document.createElement('button');
     open.type = 'button';
     open.className = 'open-solution';
     open.textContent = 'Solution';
-    msg.appendChild(open);
-  }
-}
-
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.cssText = 'position:fixed;opacity:0;';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    ta.remove();
+    host.appendChild(open);
   }
 }
 
@@ -376,48 +369,13 @@ $('artifact-close').addEventListener('click', () => {
   window.sobes.invoke('fit-solution', false).catch(() => {});
 });
 
-$('artifact-copy').addEventListener('click', async () => {
-  const btn = $('artifact-copy');
-  try {
-    await copyText(shownSolution);
-    btn.textContent = 'Copied';
-    setTimeout(() => {
-      btn.textContent = 'Copy';
-    }, 1200);
-  } catch {
-    setStatus('Copy failed');
-  }
-});
-
-stage.addEventListener('click', async (e) => {
+stage.addEventListener('click', (e) => {
   const open = e.target.closest('.open-solution');
-  if (open) {
-    const sol = solutionByMsg.get(open.closest('.msg'));
-    if (!sol) return;
-    showSolution(sol, { force: true });
-    if (stage.classList.contains('narrow')) setTab('solution');
-    return;
-  }
-  const btn = e.target.closest('.copy-btn');
-  if (!btn) return;
-  const raw = rawAnswers.get(btn.closest('.msg')) || '';
-  const parts = splitAnswer(raw);
-  const text = btn.classList.contains('copy-code')
-    ? btn.closest('.code-wrap').querySelector('code').textContent
-    : parts.solution
-      ? parts.say
-      : raw;
-  try {
-    await copyText(text);
-    btn.textContent = '✓';
-    btn.classList.add('done');
-    setTimeout(() => {
-      btn.textContent = '⧉';
-      btn.classList.remove('done');
-    }, 1200);
-  } catch {
-    setStatus('Copy failed');
-  }
+  if (!open) return;
+  const sol = solutionByMsg.get(open.closest('.msg'));
+  if (!sol) return;
+  showSolution(sol, { force: true });
+  if (stage.classList.contains('narrow')) setTab('solution');
 });
 
 function answerPayload(payload) {
@@ -481,7 +439,7 @@ async function run(label, fn) {
     if (stalled && currentText) {
       msg.classList.remove('streaming');
       finalizeBot(msg, currentText);
-      msg.append(retryNote(label, fn));
+      (msg.querySelector('.qa-body') || msg).append(retryNote(label, fn));
       window.sobes.send('log', `run stalled with partial: ${text}`);
       setStatus('');
     } else {
@@ -528,7 +486,7 @@ function askText(text) {
 function askScreen() {
   const text = input.value.trim();
   input.value = '';
-  const label = text ? `🖥 ${text}` : '🖥 Reading screen…';
+  const label = text || 'Reading screen…';
   const heard = window.audio?.dialoguePrefix?.() || '';
   const body = heard
     ? `${heard}\n\n${text || 'Find the one question on the screen and answer it using the conversation above.'}`
@@ -572,8 +530,12 @@ function blankChat() {
   };
 }
 
+function shownAsk(text) {
+  return String(text || '').replace(/^[🎧🎤🖥]\s*/, '');
+}
+
 function titleFrom(text) {
-  const clean = String(text || '').replace(/^[🎧🎤🖥]\s*/, '').replace(/\s+/g, ' ').trim();
+  const clean = shownAsk(text).replace(/\s+/g, ' ').trim();
   if (!clean || clean === 'Reading screen…') return '';
   return clean.length > 42 ? `${clean.slice(0, 42)}…` : clean;
 }
@@ -727,7 +689,7 @@ function paintChat(chat) {
       finalizeBot(el, m.text);
       if (parts.solution) lastSolution = parts.solution;
     } else if (m.kind === 'error') addMessage('error', escapeHtml(m.text));
-    else addMessage('user', escapeHtml(m.text));
+    else addMessage('user', escapeHtml(shownAsk(m.text)));
   }
   if (lastSolution) showSolution(lastSolution);
   else clearSolution();

@@ -83,7 +83,7 @@
   // ---------- shared answer flow ----------
 
   function answer(transcript, focus = '') {
-    const label = `🎧 ${transcript}`;
+    const label = transcript;
     const text = dialogueText(focus);
     return run(label, (id) => window.sobes.ask({ text, dialogue: true, label, id }));
   }
@@ -727,10 +727,10 @@
     let el = held?.el;
     if (!el || !el.isConnected) {
       el = document.createElement('div');
-      el.className = 'msg user heard-pending';
+      el.className = 'msg user talk heard-pending';
       out.appendChild(el);
     }
-    el.innerHTML = `${escapeHtml(`🎧 ${text}`)}<span class="heard-note">Waiting for the rest…</span>`;
+    el.innerHTML = `<span class="qa q">Q:</span><div class="qa-body">${escapeHtml(text)}<span class="heard-note">Waiting for the rest…</span></div>`;
     held = { text, waits, until: performance.now() + HOLD_MS, el };
   }
 
@@ -750,7 +750,7 @@
   }
 
   function showSkipped(text, why = 'No answer needed') {
-    const el = addMessage('user', escapeHtml(`🎧 ${text}`));
+    const el = addMessage('user', escapeHtml(text));
     const note = document.createElement('span');
     note.className = 'heard-note';
     note.textContent = why;
