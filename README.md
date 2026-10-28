@@ -85,16 +85,15 @@ macOS gives screen and audio permission to the app that **starts** EasySobes. If
 
 1. Run `sobes`. macOS asks to allow **Screen & System Audio Recording** for Terminal. Allow it.
    If nothing asks, open System Settings → Privacy & Security → Screen & System Audio Recording and turn on Terminal.
-2. Allow the **Microphone** for the same app (Terminal, or VS Code if you start it from there), under Privacy & Security → Microphone. EasySobes needs it to hear your answers and clarifying questions.
-3. **Quit Terminal completely** (⌘Q), open it again and run `sobes`.
+2. **Quit Terminal completely** (⌘Q), open it again and run `sobes`.
 
 If EasySobes shows "Listening" but never answers, this permission is almost always the reason.
 If you use VS Code's terminal, VS Code needs the permission, and VS Code must be in /Applications. If it runs from Downloads, macOS forgets the permission every time.
 
-On Windows, allow the microphone if Windows asks. Hiding from screen shares needs Windows 10 version 2004 or newer.
+On Windows, hiding from screen shares needs Windows 10 version 2004 or newer.
 
 ## Good to know
-- Use headphones. EasySobes is meant to be used that way: the call comes from the computer's audio, and your voice comes from the microphone. Both stay in one conversation, so the next suggestion follows what was already said. A suggestion appears when the interviewer asks something, or when you ask a clarifying question.
+- EasySobes listens to the interviewer's audio from the computer. Your own voice is not recorded. A suggestion appears when the interviewer asks something.
 - Always test in the app you share from (Zoom, Meet, Teams) before a real call. Whether a window stays hidden depends on how that app captures the screen.
 - Groq's free tier allows about 7,000 input tokens per minute. Screen questions use the most. If you hit the limit, EasySobes waits and retries by itself.
 - Your settings file: `~/Library/Application Support/easysobes/settings.json` (macOS) or `%APPDATA%\easysobes\settings.json` (Windows). The log file `easysobes.log` is in the same folder.

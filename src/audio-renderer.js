@@ -1,9 +1,8 @@
 // Renderer-side audio capture. Owned by the audio workstream (Phase 2A).
 // Uses shared helpers from renderer.js via window.app.
 //
-// Two sources at once. System audio (getDisplayMedia loopback from audio-main.js) is the
-// interviewer. The microphone is the candidate. They stay separate so each line in the
-// conversation log has a speaker. There is no fallback from one to the other.
+// One source: system audio (getDisplayMedia loopback from audio-main.js) is the
+// interviewer. The microphone is not used.
 // Modes:
 //   ⌘⇧R  manual push-to-record (window.audio.toggleRecording)
 //   ⌘⇧L  continuous listen: voice-activity detection cuts segments on silence,
@@ -14,8 +13,7 @@
   const app = window.app;
 
   // VAD tuning
-  const SILENCE_MS = 1200; // candidate: a short pause already ends their turn
-  const INTERVIEWER_SILENCE_MS = 2500; // interviewer: a pause inside a question is not the end
+  const INTERVIEWER_SILENCE_MS = 2500; // a pause inside a question is not the end
   const MIN_SPEECH_MS = 400; // ignore clicks/coughs shorter than this
   const MAX_SEGMENT_MS = 30000; // force a cut on very long monologues
   const IDLE_ROTATE_MS = 10000; // start a fresh segment if nobody talks, to drop dead air
@@ -37,16 +35,14 @@
   // ---------- source selection ----------
 
   function getSource() {
-    if (live && !live.hasMic) return 'system';
-    return 'both';
+    return 'system';
   }
 
-  // Live listen always hears both sides. The button and the settings row only report that.
   function setSource() {
     try {
       localStorage.removeItem('audioSource');
     } catch {}
-    emit({ source: getSource() });
+    emit({ source: 'system' });
   }
 
   function cycleSource() {
@@ -86,9 +82,9 @@
 
   // ---------- shared answer flow ----------
 
-  function answer(transcript, role) {
-    const label = `${role === 'me' ? '🎤' : '🎧'} ${transcript}`;
-    const text = dialogueText(role);
+  function answer(transcript) {
+    const label = `🎧 ${transcript}`;
+    const text = dialogueText();
     return run(label, () => window.sobes.ask({ text, dialogue: true, label }));
   }
 
@@ -197,8 +193,8 @@
       const transcript = ((await window.sobes.transcribe(buffer)) || '').trim();
       emit({ phase: 'idle' });
       if (!transcript) return setStatus('No speech detected');
-      remember('interviewer', transcript);
-      answer(transcript, 'interviewer');
+      remember(transcript);
+      answer(transcript);
     } catch (err) {
       emit({ phase: 'idle' });
       addMessage('error', escapeHtml(err.message));
@@ -260,7 +256,7 @@
   }
 
   // ---------- conversation memory ----------
-  // Both sides are kept for this sitting. Clear (⌘⇧K) drops it. Older turns are
+  // Interviewer lines are kept for this sitting. Clear (⌘⇧K) drops them. Older lines are
   // compressed so a long interview still fits in the free-tier token budget.
 
   // The last 10 lines go with every answer. Anything older is folded into a short summary.
@@ -291,7 +287,9 @@
     generation++;
     summarizing = false;
     conversation.turns = Array.isArray(mem?.turns)
-      ? mem.turns.map((t) => ({ role: t.role === 'me' ? 'me' : 'interviewer', text: String(t.text || '') }))
+      ? mem.turns
+          .filter((t) => t && t.role !== 'me')
+          .map((t) => ({ role: 'interviewer', text: String(t.text || '') }))
       : [];
     conversation.summary = String(mem?.summary || '');
   }
@@ -302,12 +300,12 @@
     } catch {}
   }
 
-  function remember(role, text) {
+  function remember(text) {
     const line = String(text || '').trim();
     if (!line) return;
     const last = conversation.turns[conversation.turns.length - 1];
-    if (last && last.role === role && last.text === line) return;
-    conversation.turns.push({ role, text: line });
+    if (last && last.text === line) return;
+    conversation.turns.push({ role: 'interviewer', text: line });
     publishMemory();
     maybeSummarize();
   }
@@ -319,10 +317,6 @@
   function turnsForModel() {
     const from = conversation.turns.length > KEEP_RAW ? conversation.turns.length - KEEP_RAW : 0;
     return conversation.turns.slice(from).map((t) => ({ role: t.role, text: clip(t.text) }));
-  }
-
-  function who(role) {
-    return role === 'me' ? 'Candidate' : 'Interviewer';
   }
 
   function contextBlock() {
@@ -344,7 +338,7 @@
     );
   }
 
-  function dialogueText(role) {
+  function dialogueText() {
     const lines = [];
     const context = contextBlock();
     if (context) lines.push(context);
@@ -352,23 +346,13 @@
     const turns = turnsForModel();
     if (turns.length) {
       lines.push('Conversation:');
-      for (const t of turns) lines.push(`${who(t.role)}: ${t.text}`);
+      for (const t of turns) lines.push(`Interviewer: ${t.text}`);
     }
-    if (role === 'me') {
-      lines.push(
-        '',
-        'The candidate just asked a clarifying question (the last Candidate line). ' +
-          'Give one or two spoken sentences they can say now: a clearer version of their question if the interviewer was ambiguous, ' +
-          'otherwise the answer they should give. Stay consistent with what the candidate already said.'
-      );
-    } else {
-      lines.push(
-        '',
-        'The interviewer just spoke (the last Interviewer line). Give the answer the candidate should say next. ' +
-          'If they asked for code, add it after one or two spoken sentences. ' +
-          'Stay consistent with what the candidate already said, and do not repeat it.'
-      );
-    }
+    lines.push(
+      '',
+      'The interviewer just spoke (the last Interviewer line). Give the answer the candidate should say next. ' +
+        'If they asked for code, add it after one or two spoken sentences.'
+    );
     return lines.join('\n');
   }
 
@@ -382,9 +366,9 @@
     if (!context && !conversation.summary && !turns.length) return '';
     if (turns.length) {
       lines.push('Conversation so far:');
-      for (const t of turns) lines.push(`${who(t.role)}: ${t.text}`);
+      for (const t of turns) lines.push(`Interviewer: ${t.text}`);
     }
-    lines.push('', 'Use this conversation when you answer. Do not contradict the candidate or repeat what they already said.');
+    lines.push('', 'Use these earlier interviewer questions when you answer.');
     return lines.join('\n');
   }
 
@@ -416,29 +400,9 @@
       });
   }
 
-  function normalize(s) {
-    return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
-  }
-
-  // The mic often hears the interviewer through speakers. Drop that copy.
-  function isEcho(role, text) {
-    if (role !== 'me') return false;
-    const n = normalize(text);
-    if (n.length < 8) return false;
-    return conversation.turns.slice(-4).some((t) => {
-      if (t.role !== 'interviewer') return false;
-      const o = normalize(t.text);
-      if (!o) return false;
-      if (o === n) return true;
-      const shorter = o.length < n.length ? o : n;
-      const longer = o.length < n.length ? n : o;
-      return shorter.length > 24 && longer.includes(shorter);
-    });
-  }
-
   // ---------- continuous listen mode (⌘⇧L) ----------
 
-  let live = null; // { ctx, ears, system, micStream, hasMic, timer } while live mode is on
+  let live = null; // { ctx, ears, system, timer } while live mode is on
   let starting = false;
   const segmentQueue = [];
   let processing = false;
@@ -450,7 +414,6 @@
   let wantLive = false;
   let retries = 0;
   let retryTimer = null;
-  let micWarned = false;
   const RETRY_MS = [500, 1000, 2000, 4000, 8000]; // then every 8s, forever
 
   function recover(why) {
@@ -462,15 +425,6 @@
     window.sobes.send?.('log', `live: reconnecting (${why}), attempt ${retries}`);
     emit({ mode: 'starting', level: 0 });
     retryTimer = setTimeout(() => startLive(true), wait);
-  }
-
-  async function openMic() {
-    const allowed = await window.sobes.invoke('ensure-mic');
-    if (!allowed) throw new Error('permission denied');
-    return navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-      video: false,
-    });
   }
 
   function makeEar(role, stream, ctx) {
@@ -499,7 +453,7 @@
     wantLive = true;
     if (manual) stopManual();
     starting = true;
-    emit({ mode: 'starting', level: 0, source: 'both' });
+    emit({ mode: 'starting', level: 0, source: 'system' });
     let system;
     try {
       system = await openSource(quiet);
@@ -511,51 +465,16 @@
     starting = false;
     if (!wantLive) return system.stop();
 
-    let micStream = null;
-    try {
-      micStream = await openMic();
-    } catch (err) {
-      diag(`mic unavailable: ${err.message || err}`);
-      if (!quiet && !micWarned) {
-        micWarned = true;
-        addMessage('error', escapeHtml(
-          'Your microphone is off, so your own answers are not in the conversation. ' +
-          'Allow the microphone for the app that starts EasySobes (Terminal or VS Code) under System Settings → Privacy & Security → Microphone, then turn Live off and on.'
-        ));
-      }
-    }
-    if (!wantLive) {
-      system.stop();
-      micStream?.getTracks().forEach((t) => t.stop());
-      return;
-    }
-
     const ctx = new AudioContext();
     ctx.resume().catch(() => {});
     const ears = [makeEar('interviewer', system.stream, ctx)];
-    if (micStream) ears.push(makeEar('me', micStream, ctx));
-    const l = { ctx, ears, system, micStream, hasMic: !!micStream, timer: null };
+    const l = { ctx, ears, system, timer: null };
     live = l;
     system.stream.getAudioTracks().forEach((t) =>
       t.addEventListener('ended', () => {
         if (live === l) recover('audio track ended');
       })
     );
-    if (micStream) {
-      micStream.getAudioTracks().forEach((t) =>
-        t.addEventListener('ended', () => {
-          if (live !== l) return;
-          const ear = l.ears.find((e) => e.role === 'me');
-          if (ear) ear.tap.stop();
-          l.ears = l.ears.filter((e) => e.role !== 'me');
-          l.hasMic = false;
-          emit({ source: 'system' });
-          addMessage('error', escapeHtml(
-            'Microphone stopped. The interviewer is still heard; your voice is no longer added to the conversation.'
-          ));
-        })
-      );
-    }
     ears.forEach(newSegment);
     l.timer = setInterval(tick, TICK_MS);
     if (retries) window.sobes.send?.('log', 'live: reconnected');
@@ -563,7 +482,7 @@
     emit({
       mode: 'live',
       phase: transcribing ? 'transcribing' : 'idle',
-      source: l.hasMic ? 'both' : 'system',
+      source: 'system',
       since: Date.now(),
     });
   }
@@ -573,10 +492,9 @@
       wantLive = false;
       clearTimeout(retryTimer);
       retries = 0;
-      micWarned = false;
     }
     if (!live) {
-      if (!reconnecting) emit({ mode: 'off', level: 0, source: 'both' });
+      if (!reconnecting) emit({ mode: 'off', level: 0, source: 'system' });
       return;
     }
     const l = live;
@@ -585,9 +503,8 @@
     l.ears.forEach((e) => e.tap.stop());
     l.ctx.close().catch(() => {});
     l.system.stop();
-    l.micStream?.getTracks().forEach((t) => t.stop());
     if (reconnecting) return;
-    emit({ mode: 'off', phase: transcribing ? 'transcribing' : 'idle', level: 0, source: 'both' });
+    emit({ mode: 'off', phase: transcribing ? 'transcribing' : 'idle', level: 0, source: 'system' });
   }
 
   function toggleLive() {
@@ -658,7 +575,7 @@
         ear.noise = level < ear.noise ? level : ear.noise * 0.995 + level * 0.005;
       }
       const segAge = now - ear.recStart;
-      const silenceMs = ear.role === 'interviewer' ? INTERVIEWER_SILENCE_MS : SILENCE_MS;
+      const silenceMs = INTERVIEWER_SILENCE_MS;
       if (ear.speaking && now - ear.lastVoice >= silenceMs) cutEar(ear);
       else if (segAge >= MAX_SEGMENT_MS && ear.speechMs > 0) cutEar(ear);
       else if (!ear.speaking && segAge >= IDLE_ROTATE_MS && now - ear.lastVoice >= silenceMs) cutEar(ear);
@@ -682,12 +599,8 @@
     pump();
   }
 
-  function showTranscript(role, text) {
-    if (role === 'me') {
-      const words = text.trim().split(/\s+/).filter(Boolean);
-      if (words.length < 4 && !candidateQuestion(text)) return;
-    }
-    addMessage('user', escapeHtml(`${role === 'me' ? '🎤' : '🎧'} ${text}`));
+  function showTranscript(text) {
+    addMessage('user', escapeHtml(`🎧 ${text}`));
   }
 
   function cleanErr(err) {
@@ -703,7 +616,7 @@
     let deferred = null;
     const showDeferred = () => {
       if (!deferred) return;
-      showTranscript(deferred.role, deferred.transcript);
+      showTranscript(deferred);
       deferred = null;
     };
     try {
@@ -720,23 +633,16 @@
         } finally {
           transcribing = false;
         }
-        const action = classify(item.role, transcript, item.force);
-        diag(`${item.role} "${transcript.slice(0, 180)}" → ${action}`);
+        const action = classify(transcript, item.force);
+        diag(`interviewer "${transcript.slice(0, 180)}" → ${action}`);
         if (action === 'drop') continue;
-        remember(item.role, transcript);
-        // The interviewer's question still gets a suggestion when your line is already
-        // queued. Your words stay in the log and are part of that suggestion.
-        if (action === 'answer' && item.role === 'interviewer') {
-          if (deferred) showTranscript(deferred.role, deferred.transcript);
-          deferred = { role: item.role, transcript };
-        } else if (deferred && deferred.role === 'interviewer') {
-          showTranscript(item.role, transcript);
-        } else if (action === 'answer') {
+        remember(transcript);
+        if (action === 'answer') {
           showDeferred();
-          deferred = { role: item.role, transcript };
+          deferred = transcript;
         } else {
           showDeferred();
-          showTranscript(item.role, transcript);
+          showTranscript(transcript);
         }
       }
       // The suggestion prints on its own. Recognition is free to take the next phrase,
@@ -744,7 +650,7 @@
       if (deferred) {
         const pending = deferred;
         deferred = null;
-        answer(pending.transcript, pending.role);
+        answer(pending);
       }
     } finally {
       transcribing = false;
@@ -754,17 +660,15 @@
     }
   }
 
-  // Whisper often "hears" these in silence or music. A short "yes" from the candidate
-  // is a real answer, so the mic channel only drops the obvious hallucinations.
+  // Whisper often "hears" these in silence or music.
   const HALLUCINATION =
     /^(thank you|thanks( for watching)?|bye|♪+|субтитры.*|редактор субтитров.*|продолжение следует|धन्यवाद|शुक्रिया|dhanyavaad|shukriya)[.!?।…\s]*$/i;
   const NOISE =
     /^(thank you|thanks( for watching)?|you|bye|okay|ok|ок|uh+|um+|hmm+|\.+|♪+|धन्यवाद|शुक्रिया|dhanyavaad|shukriya|ji|haan|спасибо( за просмотр)?|субтитры.*|редактор субтитров.*|продолжение следует|угу|ага|эм+|мм+)[.!?।…\s]*$/i;
-  function isNoise(t, role) {
+  function isNoise(t) {
     const s = t.trim();
     if (!s) return true;
     if (HALLUCINATION.test(s)) return true;
-    if (role === 'me') return false;
     return NOISE.test(s);
   }
 
@@ -781,38 +685,24 @@
   // \b does not see Cyrillic, so Russian words are matched as whole tokens the same way Hindi is.
   const RU_ASKS =
     /(^|[\s,.(])(что|почему|зачем|как|какой|какая|какое|какие|когда|где|куда|откуда|кто|кого|сколько|чем|чего|расскажите|расскажи|объясните|объясни|опишите|опиши|представьтесь|назовите|скажите|уточните|уточни)(?=$|[\s,.?!…:;])/i;
-  // A candidate's own answer often contains "как" or "что" in the middle. Only treat it as
-  // a clarifying question when it is marked as one, or when it starts like one.
-  const CANDIDATE_Q =
-    /^(what|why|how|when|where|who|which|can|could|would|do|does|did|is|are|tell|explain|describe|clarify|что|почему|зачем|как|какой|какая|какое|какие|когда|где|куда|кто|сколько|расскажите|расскажи|объясните|объясни|уточните|уточни|можно|kya|kyu|kyun|kaise|batao|bataiye)(?=$|[\s,.?!…:;])/i;
   function looksLikeQuestion(t) {
     if (!t || !t.trim()) return false;
     const text = t.trim();
     if (/[?؟]/.test(text)) return true;
     return PROMPT_START.test(text) || ASKS.test(text) || HINDI_ASKS.test(text) || RU_ASKS.test(text);
   }
-  function candidateQuestion(text) {
-    const line = String(text || '').trim();
-    if (!line) return false;
-    if (/[?؟]/.test(line) || CANDIDATE_Q.test(line)) return true;
-    const words = line.split(/\s+/).filter(Boolean);
-    if (words.length > 14) return false;
-    return /(уточн|поясн|имеете в виду|what do you mean|could you clarify|can you clarify|can you repeat|не расслышал)/i.test(line);
-  }
   function looksLikePrompt(t) {
-    if (isNoise(t, 'interviewer')) return false;
+    if (isNoise(t)) return false;
     if (looksLikeQuestion(t)) return true;
     const words = t.trim().split(/\s+/).filter(Boolean);
     return words.length >= 10; // long statements from the interviewer are usually prompts
   }
 
-  function classify(role, transcript, force) {
+  function classify(transcript, force) {
     const text = String(transcript || '').trim();
     if (!text) return 'drop';
-    if (isEcho(role, text)) return 'drop';
-    if (force && role === 'interviewer') return isNoise(text, role) ? 'drop' : 'answer';
-    if (isNoise(text, role)) return 'drop';
-    if (role === 'me') return candidateQuestion(text) ? 'answer' : 'note';
+    if (force) return isNoise(text) ? 'drop' : 'answer';
+    if (isNoise(text)) return 'drop';
     return looksLikePrompt(text) ? 'answer' : 'note';
   }
 

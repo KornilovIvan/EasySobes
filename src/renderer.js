@@ -199,17 +199,10 @@ function renderMarkdown(md) {
 
 // ---------- Messages ----------
 
-// A new question sits at the top of the transcript. The answer grows under it and the view stays put.
-function pinSpacer() {
-  let spacer = output.querySelector('.pin-spacer');
-  if (!spacer) {
-    spacer = document.createElement('div');
-    spacer.className = 'pin-spacer';
-    spacer.setAttribute('aria-hidden', 'true');
-  }
-  if (spacer !== output.lastElementChild) output.appendChild(spacer);
-  return spacer;
-}
+// A new question sits at the top of the transcript. The answer grows under it.
+// The scroll stops at the last line: no blank tail under the chat.
+let followQuestion = false;
+let pinning = false;
 
 function questionScrollTop(question) {
   const pad = parseFloat(getComputedStyle(output).paddingTop) || 0;
@@ -217,26 +210,27 @@ function questionScrollTop(question) {
   return Math.max(0, output.scrollTop + delta);
 }
 
-// Leave just enough blank space under the latest question and answer for that question to reach the top.
-function fitPinSpacer() {
+function pinLatestQuestion() {
+  output.querySelector('.pin-spacer')?.remove();
   const questions = output.querySelectorAll('.msg.user');
   const question = questions[questions.length - 1];
-  if (!question) {
-    output.querySelector('.pin-spacer')?.remove();
-    return null;
-  }
-  const spacer = pinSpacer();
-  const contentY = questionScrollTop(question);
-  const tail = output.scrollHeight - spacer.offsetHeight - contentY;
-  spacer.style.height = `${Math.max(0, output.clientHeight - tail)}px`;
-  return question;
+  if (!question) return;
+  const limit = Math.max(0, output.scrollHeight - output.clientHeight);
+  const top = Math.min(questionScrollTop(question), limit);
+  pinning = true;
+  output.scrollTop = top;
+  pinning = false;
 }
 
-function pinLatestQuestion() {
-  const question = fitPinSpacer();
+output.addEventListener('scroll', () => {
+  if (pinning || !followQuestion) return;
+  const questions = output.querySelectorAll('.msg.user');
+  const question = questions[questions.length - 1];
   if (!question) return;
-  output.scrollTop = questionScrollTop(question);
-}
+  const limit = Math.max(0, output.scrollHeight - output.clientHeight);
+  const top = Math.min(questionScrollTop(question), limit);
+  if (Math.abs(output.scrollTop - top) > 2) followQuestion = false;
+});
 
 let restoring = false;
 
@@ -248,11 +242,11 @@ function addMessage(cls, html) {
   const el = document.createElement('div');
   el.className = `msg ${cls}`;
   el.innerHTML = html;
-  const spacer = output.querySelector('.pin-spacer');
-  if (spacer) output.insertBefore(el, spacer);
-  else output.appendChild(el);
-  if (!restoring && (cls.includes('user') || cls.includes('bot'))) pinLatestQuestion();
-  else if (!restoring) fitPinSpacer();
+  output.appendChild(el);
+  if (!restoring && (cls.includes('user') || cls.includes('bot'))) {
+    followQuestion = true;
+    pinLatestQuestion();
+  }
   if (!restoring && (cls.includes('user') || cls.includes('error'))) rememberVisible(cls.includes('error') ? 'error' : 'user', el.textContent);
   return el;
 }
@@ -311,7 +305,7 @@ window.sobes.on('answer-chunk', (delta) => {
   if (!currentBot) return;
   currentText += delta;
   currentBot.innerHTML = renderMarkdown(currentText);
-  fitPinSpacer();
+  if (followQuestion) pinLatestQuestion();
 });
 
 // A request that arrives mid-answer (e.g. ⌘⇧Return while a live answer streams) waits its
@@ -334,7 +328,7 @@ async function run(label, fn) {
     if (!currentText && typeof answer === 'string' && answer) {
       currentText = answer;
       currentBot.innerHTML = renderMarkdown(answer);
-      fitPinSpacer();
+      if (followQuestion) pinLatestQuestion();
     }
     if (currentText) finalizeBot(msg, currentText);
     msg.classList.remove('streaming');
@@ -452,12 +446,6 @@ function setContextCharLimit(n) {
   if (field) field.maxLength = contextCharLimit;
 }
 
-function syncContextButton() {
-  const btn = $('btn-chat-context');
-  if (!btn) return;
-  btn.classList.toggle('on', !!String(activeChat?.context || '').trim());
-}
-
 function renderContextCount() {
   const field = $('context-text');
   const max = contextCharLimit;
@@ -522,7 +510,6 @@ function renderChatList() {
     }
   }
   list.innerHTML = html;
-  syncContextButton();
   const field = list.querySelector('.chat-rename');
   if (!field) return;
   const rowId = field.closest('.chat-row').dataset.id;
@@ -567,6 +554,7 @@ function paintChat(chat) {
     else addMessage('user', escapeHtml(m.text));
   }
   restoring = false;
+  followQuestion = false;
   pinLatestQuestion();
 }
 
@@ -702,8 +690,6 @@ window.sobes
 
 // ---------- Audio source / live listen ----------
 
-const SOURCE_NAMES = { system: 'System audio', mic: 'Microphone', both: 'System + mic' };
-
 function toggleLive() {
   if (typeof window.audio?.toggleLive !== 'function') return setStatus('Live listen not available yet');
   window.audio.toggleLive();
@@ -713,15 +699,13 @@ function toggleLive() {
 
 let micSince = 0;
 
-function micTexts({ mode, phase, source }) {
-  const src = SOURCE_NAMES[source] || 'Audio';
-  if (mode === 'starting') return ['Starting…', `Opening ${src.toLowerCase()}`];
+function micTexts({ mode, phase }) {
+  if (mode === 'starting') return ['Starting…', 'Opening system audio'];
   if (mode === 'recording')
-    return [phase === 'speech' ? 'Recording · hearing sound' : 'Recording', `${src} · press ⌘⇧R to stop and answer`];
+    return [phase === 'speech' ? 'Recording · hearing sound' : 'Recording', 'Interviewer · press ⌘⇧R to stop and answer'];
   if (mode === 'live') {
     const label = phase === 'transcribing' ? 'Listening · transcribing…' : phase === 'speech' ? 'Listening · hearing speech' : 'Listening';
-    const via = source === 'both' ? 'Interviewer and you · use headphones' : 'Interviewer only · microphone is off';
-    return [label, `${via} · ⌘⇧L to stop`];
+    return [label, 'Interviewer · ⌘⇧L to stop'];
   }
   if (phase === 'transcribing') return ['Transcribing…', 'Turning speech into text'];
   return ['Not listening', '⌘⇧L live listen · ⌘⇧R record'];
@@ -773,7 +757,6 @@ async function openSettings() {
     el.value = settings[k] || '';
     if (el.tagName === 'SELECT' && el.selectedIndex < 0) el.selectedIndex = 0; // e.g. no language saved yet → Auto
   });
-  $('s-source').value = window.audio?.getSource?.() || 'system';
   $('s-theme').value = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
 }
 
@@ -790,9 +773,6 @@ async function saveSettings() {
   SETTING_KEYS.forEach((k) => (settings[k] = $(`s-${k}`).value.trim()));
   const saved = await window.sobes.saveSettings(settings);
   setContextCharLimit(saved?.contextLimit);
-  try {
-    window.audio?.setSource?.($('s-source').value);
-  } catch {}
   closeSettings();
   setStatus('Settings saved');
 }

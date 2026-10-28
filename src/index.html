@@ -78,12 +78,6 @@
       <label>API base URL <input id="s-visionBaseUrl" placeholder="https://api.deepseek.com" /></label>
       <label>API key <input id="s-visionApiKey" type="password" placeholder="sk-..." /></label>
       <label>Vision model <input id="s-visionModel" placeholder="deepseek-flash" /></label>
-      <label>Audio source
-        <select id="s-source" disabled>
-          <option value="both">Interviewer (laptop audio) and you (microphone)</option>
-          <option value="system">Interviewer only — microphone is off</option>
-        </select>
-      </label>
       <label>Language they speak
         <select id="s-language">
           <option value="auto">Auto — answer in the language of the question</option>
@@ -108,7 +102,7 @@
       <div class="hint">
         <div class="hint-title">Ready when you are</div>
         <dl>
-          <dt><kbd>⌘⇧L</kbd></dt><dd>Live listen to both sides, answers from the conversation</dd>
+          <dt><kbd>⌘⇧L</kbd></dt><dd>Live listen to the interviewer, then answer</dd>
           <dt><kbd>⌘⇧R</kbd></dt><dd>Record once, then answer</dd>
           <dt><kbd>⌘⇧↩</kbd></dt><dd>Read the screen and answer</dd>
           <dt><kbd>⌘⇧I</kbd></dt><dd>Type a question</dd>
@@ -122,7 +116,7 @@
     <footer class="no-drag">
       <button id="btn-live" class="ctl" title="Live listen, auto-answer (⌘⇧L)"><span class="ic">◉</span><span class="lbl">Live</span></button>
       <button id="btn-screen" class="ctl" title="Send the screen (⌘⇧Enter)"><span class="ic">🖥</span><span class="lbl">Send screen</span></button>
-      <button id="btn-chat-context" class="ctl" type="button" title="Context for this chat">Context</button>
+      <button id="btn-chat-context" class="ctl" type="button" title="Add context for this chat">Add context</button>
       <input id="input" placeholder="Ask anything…" />
     </footer>
       </div>

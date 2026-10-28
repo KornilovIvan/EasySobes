@@ -380,13 +380,10 @@ const SCREEN_ASK =
   'If it is multiple choice, say which option is right and why. ' +
   'If there is no question at all, say in one short line what is on the screen.';
 
-// Appended only when the request includes the live transcript (both sides).
+// Appended only when the request includes the interviewer's transcript.
 const DIALOGUE =
-  'DIALOGUE: The user message includes a live transcript labeled Interviewer and Candidate. ' +
-  'Treat it as what was actually said. Stay consistent with the candidate and do not repeat an answer they already gave. ' +
-  'If the note says the candidate just asked a clarifying question, reply with one or two spoken sentences: ' +
-  'a clearer version of their question when the interviewer was ambiguous, otherwise the answer they should give. ' +
-  'If the note says the interviewer just spoke, reply with the words the candidate should say next. ' +
+  'DIALOGUE: The user message includes what the interviewer said. ' +
+  'Reply with the words the candidate should say next. ' +
   'If that question asks them to write or fix code, add the code after one or two spoken sentences.';
 
 function buildMessages(userContent, settings, dialogue) {
@@ -606,10 +603,13 @@ function cleanChat(raw) {
       kind: m?.kind === 'bot' || m?.kind === 'error' ? m.kind : 'user',
       text: String(m?.text || '').slice(0, 16000),
     })),
-    turns: turns.slice(-40).map((t) => ({
-      role: t?.role === 'me' ? 'me' : 'interviewer',
-      text: String(t?.text || '').slice(0, 2000),
-    })),
+    turns: turns
+      .filter((t) => t?.role !== 'me')
+      .slice(-40)
+      .map((t) => ({
+        role: 'interviewer',
+        text: String(t?.text || '').slice(0, 2000),
+      })),
     context: String(raw?.context || '').slice(0, contextLimitOf(currentSettings())),
   };
 }
@@ -689,8 +689,9 @@ ipcMain.handle('summarize-turns', async (_e, payload) => {
   const turns = Array.isArray(payload?.turns) ? payload.turns : [];
   const prior = String(payload?.summary || '').trim();
   const body = turns
-    .map((t) => `${t.role === 'me' ? 'Candidate' : 'Interviewer'}: ${String(t.text || '').trim()}`)
-    .filter((line) => !line.endsWith(':'))
+    .filter((t) => t?.role !== 'me')
+    .map((t) => `Interviewer: ${String(t.text || '').trim()}`)
+    .filter((line) => line !== 'Interviewer:')
     .join('\n');
   if (!body) return prior;
   return completeChat(
@@ -698,26 +699,13 @@ ipcMain.handle('summarize-turns', async (_e, payload) => {
       {
         role: 'system',
         content:
-          'Compress an interview into at most 120 words. Keep what the candidate already said, which questions were answered, ' +
+          'Compress the interviewer questions into at most 120 words. Keep which questions were asked ' +
           'and what the interviewer cared about. No advice. No quotes longer than one sentence.',
       },
       { role: 'user', content: `${prior ? `Earlier summary:\n${prior}\n\n` : ''}New lines:\n${body}` },
     ],
     1500
   );
-});
-
-ipcMain.handle('ensure-mic', async () => {
-  if (process.platform !== 'darwin') return true;
-  try {
-    const status = systemPreferences.getMediaAccessStatus('microphone');
-    if (status === 'granted') return true;
-    if (status === 'denied' || status === 'restricted') return false;
-    return await systemPreferences.askForMediaAccess('microphone');
-  } catch (err) {
-    console.error('[audio] microphone permission:', err);
-    return false;
-  }
 });
 
 ipcMain.handle('transcribe', async (_e, audioBuffer) => {
