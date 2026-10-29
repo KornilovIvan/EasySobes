@@ -695,7 +695,7 @@ async function run(label, fn) {
   answerEpoch = epoch;
   setStatus('Thinking…', 'busy');
   solutionDismissed = false;
-  if (label) addMessage('user', escapeHtml(label));
+  if (label) addMessage('user', escapeHtml(shownAsk(label)));
   currentText = '';
   const msg = addMessage('bot streaming', '<div class="md"><span class="dots"><i></i><i></i><i></i></span></div>');
   currentBot = msg.querySelector('.md');
@@ -807,7 +807,10 @@ function blankChat() {
 }
 
 function shownAsk(text) {
-  return String(text || '').replace(/^[🎧🎤🖥]\s*/, '');
+  // Old questions were saved with a leading emoji. A partial strip left a broken half-character.
+  let s = String(text || '').replace(/^(?:[🎧🎤🖥]\uFE0F?)+[\s\uFE0F]*/u, '');
+  s = s.replace(/^(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDBFF]|[\uDC00-\uDFFF]|\uFFFD)+\s*/, '');
+  return s;
 }
 
 function titleFrom(text) {
@@ -960,7 +963,7 @@ function renderChatList() {
         `<input class="chat-rename" maxlength="80" value="${escapeHtml(chat.title || 'New chat')}" /></div>`;
     } else {
       html += `<div class="chat-row${on}" data-id="${id}">` +
-        `<button type="button" class="chat-open">${escapeHtml(chat.title || 'New chat')}</button>` +
+        `<button type="button" class="chat-open">${escapeHtml(shownAsk(chat.title) || 'New chat')}</button>` +
         `<button type="button" class="chat-rename-btn" aria-label="Rename">✎</button>` +
         `<button type="button" class="chat-del" aria-label="Delete">×</button></div>`;
     }
@@ -1242,6 +1245,11 @@ async function saveSettings() {
 
 // ---------- Wiring ----------
 
+function focusAskField() {
+  window.sobes.invoke('focus-for-typing').then(() => input.focus()).catch(() => input.focus());
+}
+
+input.addEventListener('pointerdown', focusAskField);
 input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     askText(input.value);
@@ -1368,7 +1376,7 @@ $('chat-list').ondblclick = (e) => {
 window.sobes.on('hotkey-record', () => window.audio.toggleRecording());
 window.sobes.on('hotkey-screen', askScreen);
 window.sobes.on('hotkey-clear', clearAll);
-window.sobes.on('hotkey-focus', () => input.focus());
+window.sobes.on('hotkey-focus', focusAskField);
 
 // audio-renderer.js loads after this file, so read the source once everything is parsed.
 window.addEventListener('DOMContentLoaded', async () => {
@@ -1391,6 +1399,7 @@ window.app = {
   addMessage,
   setStatus,
   escapeHtml,
+  shownAsk,
   isBusy: () => busy,
   onMemoryChanged: persistSoon,
   chatContext: () => String(activeChat?.context || ''),

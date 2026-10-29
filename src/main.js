@@ -174,6 +174,9 @@ function createWindow() {
   log('--- started ---');
 
   win.setContentProtection(true);
+  // A fullscreenable window that sits on every Space cannot become the key window,
+  // so the question field never receives keys until something else activates the app.
+  win.setFullScreenable(false);
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(path.join(__dirname, 'index.html'));
@@ -187,6 +190,21 @@ function toggleWindow() {
 function moveWindow(dx, dy) {
   const [x, y] = win.getPosition();
   win.setPosition(x + dx, y + dy);
+}
+
+// A screen-saver-level overlay is not a key window, so typed questions only worked
+// after Live capture happened to activate the app. Drop to floating, take focus, then
+// restore the level. The window stays key, so the field can take keys with Live off.
+function focusForTyping() {
+  if (!win || win.isDestroyed()) return;
+  win.setAlwaysOnTop(true, 'floating');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  if (!win.isVisible()) win.show();
+  if (process.platform === 'darwin') app.focus({ steal: true });
+  win.focus();
+  win.webContents.focus();
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 }
 
 // ---------- Screen capture (ONLY on an explicit ask: ⌘⇧Return or the 🖥 button) ----------
@@ -872,6 +890,7 @@ ipcMain.handle('transcribe', async (_e, audioBuffer) => {
 });
 
 ipcMain.on('hide', () => win.hide());
+ipcMain.handle('focus-for-typing', () => focusForTyping());
 
 app.whenReady().then(() => {
   if (process.platform === 'darwin') app.dock.hide(); // no Dock icon, not in Cmd+Tab
@@ -901,8 +920,7 @@ app.whenReady().then(() => {
   register('CommandOrControl+Shift+R', send('hotkey-record'));
   register('CommandOrControl+Shift+K', send('hotkey-clear'));
   register('CommandOrControl+Shift+I', () => {
-    win.show();
-    win.focus();
+    focusForTyping();
     win.webContents.send('hotkey-focus');
   });
   register('CommandOrControl+Shift+Up', () => moveWindow(0, -40));
