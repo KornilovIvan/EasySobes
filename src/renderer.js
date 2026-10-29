@@ -213,18 +213,302 @@ function renderBlocks(text) {
   return html;
 }
 
+function codeWords(list) {
+  return new Set(list.trim().split(/\s+/));
+}
+
+const CODE_SPECS = (() => {
+  const cLike = {
+    lines: ['//'],
+    block: true,
+    template: false,
+    keywords: codeWords(
+      'if else for while return break continue switch case default do struct enum const static sizeof typedef true false null'
+    ),
+  };
+  const jsWords = codeWords(
+    'if else for while return break continue switch case default do function class extends new try catch finally throw const let var async await import export from of in typeof instanceof void delete yield this super static true false null undefined'
+  );
+  const javaWords = codeWords(
+    'abstract assert boolean break byte case catch char class const continue default do double else enum extends final finally float for if implements import instanceof int interface long native new package private protected public return short static super switch synchronized this throw throws transient try void volatile while true false null'
+  );
+  return {
+    plain: { lines: ['//'], block: true, keywords: codeWords('') },
+    python: {
+      lines: ['#'],
+      triples: true,
+      prefixes: true,
+      keywords: codeWords(
+        'if elif else for while return break continue class def try except finally raise with as import from pass lambda yield global nonlocal assert del in is not and or None True False async await'
+      ),
+    },
+    javascript: { lines: ['//'], block: true, template: true, keywords: jsWords },
+    typescript: {
+      lines: ['//'],
+      block: true,
+      template: true,
+      keywords: codeWords(
+        `${[...jsWords].join(' ')} type interface implements public private protected readonly declare namespace abstract enum as`
+      ),
+    },
+    java: { lines: ['//'], block: true, keywords: javaWords },
+    kotlin: {
+      lines: ['//'],
+      block: true,
+      keywords: codeWords(
+        'if else for while return break continue when class object fun val var try catch finally throw import package is in as true false null override open abstract interface data companion suspend'
+      ),
+    },
+    go: {
+      lines: ['//'],
+      block: true,
+      template: true,
+      keywords: codeWords(
+        'break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var true false nil'
+      ),
+    },
+    rust: {
+      lines: ['//'],
+      block: true,
+      keywords: codeWords(
+        'as async await break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while'
+      ),
+    },
+    cpp: {
+      lines: ['//'],
+      block: true,
+      keywords: codeWords(
+        `${[...cLike.keywords].join(' ')} class namespace template typename public private protected virtual using new delete try catch throw bool nullptr this auto`
+      ),
+    },
+    csharp: {
+      lines: ['//'],
+      block: true,
+      keywords: codeWords(
+        `${[...javaWords].join(' ')} var string bool namespace using async await lock params ref out`
+      ),
+    },
+    sql: {
+      lines: ['--'],
+      block: true,
+      ignoreCase: true,
+      keywords: codeWords(
+        'select from where group by order having join left right inner outer on as insert into values update set delete create table drop alter and or not null is in like between distinct limit offset union all exists case when then else end primary key foreign references int integer text varchar boolean true false'
+      ),
+    },
+    bash: {
+      lines: ['#'],
+      keywords: codeWords('if then fi else elif for while do done case esac function return echo export local'),
+    },
+    json: { keywords: codeWords('true false null') },
+    yaml: { lines: ['#'] },
+    markup: { html: true, keywords: codeWords('') },
+  };
+})();
+
+function codeSpec(lang) {
+  const id = String(lang || '').toLowerCase().replace(/^\./, '');
+  const alias = {
+    py: 'python',
+    python3: 'python',
+    js: 'javascript',
+    jsx: 'javascript',
+    mjs: 'javascript',
+    node: 'javascript',
+    ts: 'typescript',
+    tsx: 'typescript',
+    kt: 'kotlin',
+    'c++': 'cpp',
+    cc: 'cpp',
+    hpp: 'cpp',
+    h: 'cpp',
+    cxx: 'cpp',
+    c: 'cpp',
+    cs: 'csharp',
+    'c#': 'csharp',
+    rs: 'rust',
+    sh: 'bash',
+    shell: 'bash',
+    zsh: 'bash',
+    yml: 'yaml',
+    html: 'markup',
+    xml: 'markup',
+    svg: 'markup',
+    md: 'plain',
+    markdown: 'plain',
+  }[id] || id;
+  return CODE_SPECS[alias] || CODE_SPECS.plain;
+}
+
+function isCodeWord(ch) {
+  return !!ch && /[A-Za-z0-9_]/.test(ch);
+}
+
+function readCodeString(code, i, spec) {
+  if (spec.triples && (code.startsWith('"""', i) || code.startsWith("'''", i))) {
+    const quote = code.slice(i, i + 3);
+    const end = code.indexOf(quote, i + 3);
+    return end === -1 ? code.length : end + 3;
+  }
+  const quote = code[i];
+  if (quote !== '"' && quote !== "'" && !(quote === '`' && spec.template)) return i;
+  let j = i + 1;
+  while (j < code.length) {
+    if (code[j] === '\\') {
+      j += 2;
+      continue;
+    }
+    if (code[j] === '\n' && quote !== '`') return i;
+    if (code[j] === quote) return j + 1;
+    j++;
+  }
+  return code.length;
+}
+
+function highlightCode(code, lang) {
+  const spec = codeSpec(lang);
+  const lines = spec.lines || [];
+  let i = 0;
+  let html = '';
+  let plain = '';
+  const flush = () => {
+    if (!plain) return;
+    html += escapeHtml(plain);
+    plain = '';
+  };
+  const take = (cls, end) => {
+    flush();
+    html += `<span class="${cls}">${escapeHtml(code.slice(i, end))}</span>`;
+    i = end;
+  };
+  while (i < code.length) {
+    if (spec.block && code.startsWith('/*', i)) {
+      const end = code.indexOf('*/', i + 2);
+      take('syn-cmt', end === -1 ? code.length : end + 2);
+      continue;
+    }
+    if (spec.html && code.startsWith('<!--', i)) {
+      const end = code.indexOf('-->', i + 4);
+      take('syn-cmt', end === -1 ? code.length : end + 3);
+      continue;
+    }
+    const mark = lines.find((item) => code.startsWith(item, i));
+    if (mark) {
+      const end = code.indexOf('\n', i);
+      take('syn-cmt', end === -1 ? code.length : end);
+      continue;
+    }
+    if (spec.html && code[i] === '<') {
+      const end = code.indexOf('>', i + 1);
+      take('syn-fn', end === -1 ? Math.min(code.length, i + 1) : end + 1);
+      continue;
+    }
+    const strEnd = readCodeString(code, i, spec);
+    if (strEnd > i) {
+      take('syn-str', strEnd);
+      continue;
+    }
+    const ch = code[i];
+    if ((ch === '+' || ch === '-' || (ch >= '0' && ch <= '9')) && !isCodeWord(code[i - 1])) {
+      const num = /^[+-]?(?:0x[\da-fA-F]+|\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(code.slice(i));
+      if (num && /\d/.test(num[0])) {
+        take('syn-num', i + num[0].length);
+        continue;
+      }
+    }
+    if (/[A-Za-z_]/.test(ch)) {
+      const word = /^[A-Za-z_]\w*/.exec(code.slice(i))[0];
+      const after = i + word.length;
+      if (spec.prefixes && /^(?:fr|rf|rb|br|[rRuUbBfF])$/.test(word) && (code[after] === '"' || code[after] === "'")) {
+        const end = readCodeString(code, after, spec);
+        if (end > after) {
+          take('syn-str', end);
+          continue;
+        }
+      }
+      const key = spec.ignoreCase ? word.toLowerCase() : word;
+      if (spec.keywords && spec.keywords.has(key)) take('syn-kw', after);
+      else if (/^\s*\(/.test(code.slice(after))) take('syn-fn', after);
+      else {
+        plain += word;
+        i = after;
+      }
+      continue;
+    }
+    plain += ch;
+    i++;
+  }
+  flush();
+  return html;
+}
+
+function paintProseLine(line) {
+  if (/^\s{0,3}#{1,6}\s+\S/.test(line)) return `<span class="syn-kw">${escapeHtml(line)}</span>`;
+  let html = '';
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === '`') {
+      const end = line.indexOf('`', i + 1);
+      if (end > i) {
+        html += `<span class="syn-str">${escapeHtml(line.slice(i, end + 1))}</span>`;
+        i = end + 1;
+        continue;
+      }
+    }
+    const next = line.indexOf('`', i);
+    const stop = next === -1 ? line.length : next;
+    html += escapeHtml(line.slice(i, stop));
+    i = stop;
+  }
+  return html;
+}
+
+function paintSource(src) {
+  const lines = String(src || '').split('\n');
+  const out = [];
+  let inFence = false;
+  let lang = '';
+  let buf = [];
+  for (const line of lines) {
+    const open = !inFence && /^\s*```[ \t]*([\w+#.-]*)\s*$/.exec(line);
+    const close = inFence && /^\s*```\s*$/.test(line);
+    if (open) {
+      inFence = true;
+      lang = open[1];
+      out.push(`<span class="syn-fence">${escapeHtml(line)}</span>`);
+      continue;
+    }
+    if (close) {
+      if (buf.length) out.push(highlightCode(buf.join('\n'), lang));
+      buf = [];
+      inFence = false;
+      lang = '';
+      out.push(`<span class="syn-fence">${escapeHtml(line)}</span>`);
+      continue;
+    }
+    if (inFence) {
+      buf.push(line);
+      continue;
+    }
+    out.push(paintProseLine(line));
+  }
+  if (buf.length) out.push(highlightCode(buf.join('\n'), lang));
+  return out.join('\n');
+}
+
 function renderMarkdown(md) {
   // Odd parts are fenced code. An unclosed fence while streaming still renders as code.
   return md
     .split(/^\s*```/m)
     .map((part, i) => {
       if (i % 2 === 0) return renderBlocks(part);
-      const lang = (part.match(/^[\w+#.-]*/) || [''])[0];
-      const code = part.replace(/^[\w+#.-]*[^\n]*\n?/, '').replace(/\n$/, '');
+      const head = /^[ \t]*([\w+#.-]*)[^\n]*\n?/.exec(part);
+      const lang = head ? head[1] : '';
+      const code = part.slice(head ? head[0].length : 0).replace(/\n$/, '');
       return (
         '<div class="code-wrap">' +
         (lang ? `<span class="code-lang">${escapeHtml(lang)}</span>` : '') +
-        `<pre><code>${escapeHtml(code)}</code></pre></div>`
+        `<pre><code>${highlightCode(code, lang)}</code></pre></div>`
       );
     })
     .join('');
@@ -232,37 +516,27 @@ function renderMarkdown(md) {
 
 // ---------- Messages ----------
 
-// A new question sits at the top of the transcript. The answer grows under it.
-// The scroll stops at the last line: no blank tail under the chat.
+// The last message stays at the top of the chat. Width changes must not slide the view upward.
 let followQuestion = false;
 let pinning = false;
 
-function questionScrollTop(question) {
-  const pad = parseFloat(getComputedStyle(output).paddingTop) || 0;
-  const delta = question.getBoundingClientRect().top - (output.getBoundingClientRect().top + output.clientTop + pad);
-  return Math.max(0, output.scrollTop + delta);
+function lastMessage() {
+  const messages = output.querySelectorAll('.msg');
+  return messages[messages.length - 1] || null;
 }
 
 function pinLatestQuestion() {
   output.querySelector('.pin-spacer')?.remove();
-  const questions = output.querySelectorAll('.msg.user');
-  const question = questions[questions.length - 1];
-  if (!question) return;
-  const limit = Math.max(0, output.scrollHeight - output.clientHeight);
-  const top = Math.min(questionScrollTop(question), limit);
+  if (!lastMessage()) return;
   pinning = true;
-  output.scrollTop = top;
+  output.scrollTop = Math.max(0, output.scrollHeight - output.clientHeight);
   pinning = false;
 }
 
 output.addEventListener('scroll', () => {
   if (pinning || !followQuestion) return;
-  const questions = output.querySelectorAll('.msg.user');
-  const question = questions[questions.length - 1];
-  if (!question) return;
   const limit = Math.max(0, output.scrollHeight - output.clientHeight);
-  const top = Math.min(questionScrollTop(question), limit);
-  if (Math.abs(output.scrollTop - top) > 2) followQuestion = false;
+  if (Math.abs(output.scrollTop - limit) > 2) followQuestion = false;
 });
 
 let restoring = false;
@@ -329,16 +603,17 @@ function showSolution(markdown, opts = {}) {
   if (solutionDismissed) return;
   const opening = !stage.classList.contains('has-solution');
   stage.classList.add('has-solution');
-  if (opening) window.sobes.invoke('fit-solution', true).catch(() => {});
+  if (opening) pinLatestQuestion();
 }
 
 function clearSolution() {
   shownSolution = '';
   solutionDismissed = false;
+  const open = stage.classList.contains('has-solution');
   $('artifact-body').innerHTML = '';
   stage.classList.remove('has-solution');
   setTab('talk');
-  window.sobes.invoke('fit-solution', false).catch(() => {});
+  if (open) pinLatestQuestion();
 }
 
 function paintLive(raw) {
@@ -355,6 +630,7 @@ function paintLive(raw) {
 
 new ResizeObserver(() => {
   stage.classList.toggle('narrow', stage.clientWidth < 680);
+  pinLatestQuestion();
 }).observe(stage);
 
 $('stage-tabs').addEventListener('click', (e) => {
@@ -366,7 +642,7 @@ $('artifact-close').addEventListener('click', () => {
   solutionDismissed = true;
   stage.classList.remove('has-solution');
   setTab('talk');
-  window.sobes.invoke('fit-solution', false).catch(() => {});
+  pinLatestQuestion();
 });
 
 stage.addEventListener('click', (e) => {
@@ -588,6 +864,53 @@ function renderContextCount() {
   el.classList.toggle('long', n > 4000);
 }
 
+function renderContextPaint() {
+  const field = $('context-text');
+  const paint = $('context-paint');
+  if (!field || !paint) return;
+  paint.innerHTML = paintSource(field.value);
+  paint.scrollTop = field.scrollTop;
+  paint.scrollLeft = field.scrollLeft;
+}
+
+function showContextPane(pane) {
+  const write = pane !== 'preview';
+  $('context-editor').classList.toggle('hidden', !write);
+  $('context-preview').classList.toggle('hidden', write);
+  $('context-tab-write').classList.toggle('on', write);
+  $('context-tab-preview').classList.toggle('on', !write);
+  if (write) {
+    renderContextPaint();
+    $('context-text').focus();
+    return;
+  }
+  const text = $('context-text').value;
+  $('context-preview').innerHTML = text.trim()
+    ? renderMarkdown(text)
+    : '<p class="context-empty">Nothing to preview.</p>';
+}
+
+function indentContext(shift) {
+  const field = $('context-text');
+  const value = field.value;
+  const start = field.selectionStart;
+  const end = field.selectionEnd;
+  if (!shift && start === end) {
+    field.setRangeText('  ', start, end, 'end');
+    renderContextCount();
+    renderContextPaint();
+    return;
+  }
+  const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+  const lineEndIdx = value.indexOf('\n', end);
+  const lineEnd = lineEndIdx === -1 ? value.length : lineEndIdx;
+  const block = value.slice(lineStart, lineEnd);
+  const next = block.split('\n').map((line) => (shift ? line.replace(/^( {1,2}|\t)/, '') : `  ${line}`)).join('\n');
+  field.setRangeText(next, lineStart, lineEnd, 'select');
+  renderContextCount();
+  renderContextPaint();
+}
+
 function openContext(id) {
   const chat = chats.find((c) => c.id === id) || activeChat;
   if (!chat) return;
@@ -598,7 +921,7 @@ function openContext(id) {
   field.value = String(chat.context || '').slice(0, contextCharLimit);
   renderContextCount();
   $('context-modal').classList.remove('hidden');
-  $('context-text').focus();
+  showContextPane('write');
 }
 
 function closeContext() {
@@ -936,13 +1259,28 @@ $('context-close').onclick = closeContext;
 $('context-modal').onclick = (e) => {
   if (e.target === $('context-modal')) closeContext();
 };
-$('context-text').addEventListener('input', renderContextCount);
-$('context-text').addEventListener('keydown', (e) => {
+$('context-text').addEventListener('input', () => {
+  renderContextCount();
+  renderContextPaint();
+});
+$('context-text').addEventListener('scroll', () => {
+  const paint = $('context-paint');
+  paint.scrollTop = $('context-text').scrollTop;
+  paint.scrollLeft = $('context-text').scrollLeft;
+});
+$('context-form').addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     e.preventDefault();
     closeContext();
+    return;
+  }
+  if (e.key === 'Tab' && e.target === $('context-text')) {
+    e.preventDefault();
+    indentContext(e.shiftKey);
   }
 });
+$('context-tab-write').onclick = () => showContextPane('write');
+$('context-tab-preview').onclick = () => showContextPane('preview');
 $('btn-live').onclick = toggleLive;
 $('btn-screen').onclick = () => askScreen();
 $('btn-settings').onclick = openSettings;

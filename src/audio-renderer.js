@@ -334,9 +334,9 @@
     } catch {}
     if (body.length > max) body = body.slice(0, max);
     return (
-      'Background the candidate added for this chat:\n' +
+      'Background the candidate added for this chat. It may include Markdown and fenced code:\n' +
       body +
-      '\n\nRely on this background in every answer. Do not contradict it.'
+      '\n\nRely on this background in every answer. Do not contradict it. Treat fenced code as code the candidate already has.'
     );
   }
 
