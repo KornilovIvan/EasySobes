@@ -24,6 +24,7 @@ if (!navigator.userAgent.includes('Macintosh')) {
 
 let answerEpoch = 0;
 let answerSerial = 0;
+let busy = false;
 let currentBot = null;
 let currentText = '';
 let shownSolution = '';
