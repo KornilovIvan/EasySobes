@@ -6,7 +6,7 @@
 #   1. uses your Node.js 20+ if you have it, otherwise downloads a private copy (checksum verified)
 #   2. downloads EasySobes and installs Electron
 #   3. adds the `sobes` command to your shell
-#   4. runs `sobes setup` (API key, profile, resume) unless you already did it
+#   4. runs `sobes setup` (API key) unless you already did it
 # Running it again updates EasySobes and keeps your settings.
 set -euo pipefail
 
@@ -98,5 +98,5 @@ fi
 
 echo
 bold "Done! From now on, open a new Terminal window and type:  sobes"
-echo "   sobes setup    change your API key, profile or resume"
+echo "   sobes setup    change your API key"
 echo "   sobes update   get the latest version"

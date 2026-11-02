@@ -32,22 +32,9 @@
   // Scale RMS (~0.005 quiet … ~0.2 loud) into 0..1 on a log curve for a readable meter.
   const meterLevel = (r) => Math.max(0, Math.min(1, (Math.log10(Math.max(r, 1e-4)) + 2.6) / 2));
 
-  // ---------- source selection ----------
-
+  // The only capture source is system audio.
   function getSource() {
     return 'system';
-  }
-
-  function setSource() {
-    try {
-      localStorage.removeItem('audioSource');
-    } catch {}
-    emit({ source: 'system' });
-  }
-
-  function cycleSource() {
-    setSource();
-    return getSource();
   }
 
   async function getSystemStream() {
@@ -780,9 +767,6 @@
     toggleLive,
     isLive: () => !!live,
     getState: () => ({ ...micState }),
-    cycleSource,
-    getSource,
-    setSource,
     clearConversation,
     getMemory,
     setMemory,

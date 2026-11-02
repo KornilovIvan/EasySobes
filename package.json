@@ -31,8 +31,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "electron": "^44.4.3",
-    "unpdf": "^1.8.1"
+    "electron": "^44.4.3"
   },
   "devDependencies": {
     "electron-builder": "^26.15.3"
@@ -72,7 +71,6 @@
       "entitlementsInherit": "build/entitlements.mac.plist",
       "notarize": false,
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "EasySobes listens to your microphone to transcribe questions and answer them.",
         "NSScreenCaptureUsageDescription": "EasySobes reads your screen to answer questions about what is shown.",
         "NSAudioCaptureUsageDescription": "EasySobes captures system audio to transcribe the other side of a call.",
         "LSUIElement": true

@@ -1,5 +1,5 @@
-// `sobes setup`: a terminal wizard that asks for the Groq key and a short profile,
-// then saves them to the same settings.json the app reads (merged, never overwritten).
+// `sobes setup`: a terminal wizard that asks for the Groq key,
+// then saves it to the same settings.json the app reads (merged, never overwritten).
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -89,11 +89,6 @@ async function runSetup({ ifNeeded = false } = {}) {
       else waiters.push(resolve);
     });
 
-  const ask = async (question, fallback = '') => {
-    const hint = fallback ? dim(` [${fallback}]`) : '';
-    return (await nextLine(`${question}${hint}: `)).trim() || fallback;
-  };
-
   // Shows * for each character so a pasted key is visible as "something arrived" but not readable.
   const askSecret = async (question) => {
     const prompt = `${question}: `;
@@ -143,17 +138,6 @@ async function runSetup({ ifNeeded = false } = {}) {
     }
   }
 
-  // 2. Profile
-  const p = current.profile || {};
-  console.log(`\n${bold('About you')} ${dim('— EasySobes uses this to answer as you')}`);
-  const profile = {
-    name: await ask('Your name', p.name),
-    role: await ask('Job role you are interviewing for (e.g. Data Analyst)', p.role),
-    experience: await ask('Years of experience (e.g. Fresher, 2 years)', p.experience),
-    skills: await ask('Top skills, comma separated', p.skills),
-    notes: await ask('Anything else EasySobes should know? (optional)', p.notes),
-  };
-
   rl.close();
 
   if (!apiKey) {
@@ -162,7 +146,7 @@ async function runSetup({ ifNeeded = false } = {}) {
   }
   // A channel that already points somewhere else (for example text on DeepSeek) keeps its own key.
   const previous = current.apiKey || '';
-  const patch = { apiKey, baseUrl, profile, context: '' };
+  const patch = { apiKey, baseUrl };
   for (const kind of ['speech', 'text', 'vision']) {
     const ownKey = current[`${kind}ApiKey`] || '';
     const ownUrl = current[`${kind}BaseUrl`] || '';

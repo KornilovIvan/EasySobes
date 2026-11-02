@@ -60,26 +60,9 @@ const LANGUAGE_PROMPTS = {
     'Keep technical words in English. Never use Devanagari.',
 };
 
-// settings.profile comes from the `sobes setup` wizard. Per-chat notes travel in the user message.
-function profileText(profile = {}) {
-  return [
-    ['Name', profile.name],
-    ['Interviewing for', profile.role],
-    ['Experience', profile.experience],
-    ['Key skills', profile.skills],
-    ['Notes', profile.notes],
-  ]
-    .filter(([, value]) => String(value || '').trim())
-    .map(([label, value]) => `${label}: ${String(value).trim()}`)
-    .join('\n');
-}
-
 function systemPrompt(settings = {}) {
   const language = LANGUAGE_PROMPTS[settings.language] || LANGUAGE_PROMPTS.auto;
-  let prompt = `${BASE}\n\nLANGUAGE OF THE CONVERSATION: ${language}`;
-  const profile = profileText(settings.profile);
-  if (profile) prompt += `\n\nBackground about the user and this conversation (use it to personalize answers):\n${profile}`;
-  return prompt;
+  return `${BASE}\n\nLANGUAGE OF THE CONVERSATION: ${language}`;
 }
 
 module.exports = { systemPrompt };

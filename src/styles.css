@@ -388,13 +388,18 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .settings-back button { align-self: flex-start; padding: 6px 12px; font-weight: 650; }
 .settings-back button:active { transform: none; }
 .settings-note { margin: 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
-.settings-group { margin: 10px 0 0; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.settings-group { margin: 16px 0 0; font-size: 15px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--text); }
+.settings-group:first-of-type { margin-top: 4px; }
 .settings label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--text-2); }
 .settings label input, .settings label select, .settings label textarea { font-weight: 400; font-size: 13px; }
 .settings label.check { flex-direction: row; align-items: center; gap: 7px; font-weight: 500; }
 .settings .row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
 .settings .row .row-label { font-weight: 600; }
-.settings .row .spacer { flex: 1; }
+.settings-actions { margin-top: 4px; }
+.settings-actions #btn-save { margin-left: auto; }
+#key-check:empty { display: none; }
+#key-check span { display: block; }
+#key-check .bad { color: var(--danger); }
 .font-val { min-width: 34px; text-align: center; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .settings::-webkit-scrollbar, .output::-webkit-scrollbar, .artifact-body::-webkit-scrollbar { width: 8px; }
 .settings::-webkit-scrollbar-thumb, .output::-webkit-scrollbar-thumb, .artifact-body::-webkit-scrollbar-thumb {
@@ -651,6 +656,7 @@ footer button { flex-shrink: 0; }
 .ctl { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 10px; border-radius: 10px; font-weight: 600; }
 .ctl .ic { font-size: 13px; line-height: 1; }
 #btn-live.on, #btn-live.on:hover { background: var(--listen); border-color: var(--listen); color: #111; }
+#btn-ask { padding: 0 12px; }
 
 .context-modal {
   position: absolute;

@@ -33,7 +33,6 @@ const DEFAULT_SETTINGS = {
   chatModel: 'openai/gpt-oss-120b',
   visionModel: 'qwen/qwen3.8-27b',
   sttModel: 'whisper-large-v3-turbo',
-  context: '',
   contextLimit: 16000,
   language: 'auto', // auto | en | ru | hi | hinglish — what the other people speak
 };
@@ -92,9 +91,9 @@ function loadSettings() {
       merged.chatUpgraded = true;
       dirty = true;
     }
-    // The settings resume field is gone. Per-chat context is the only note that goes out.
-    if (String(merged.context || '').trim()) {
-      merged.context = '';
+    // A global context used to live next to the API key. Notes now belong to each chat.
+    if ('context' in merged) {
+      delete merged.context;
       dirty = true;
     }
     // Chats and the shrink-to-bar height are gone.
@@ -664,11 +663,55 @@ function cleanChat(raw) {
   };
 }
 
+function profileNote(profile) {
+  if (!profile || typeof profile !== 'object') return '';
+  return [
+    ['Name', profile.name],
+    ['Interviewing for', profile.role],
+    ['Experience', profile.experience],
+    ['Key skills', profile.skills],
+    ['Notes', profile.notes],
+  ]
+    .filter(([, value]) => String(value || '').trim())
+    .map(([label, value]) => `${label}: ${String(value).trim()}`)
+    .join('\n');
+}
+
+// The setup wizard used to store a person once for every chat. Move that text into
+// chats that have no notes yet, then drop the profile so a new empty chat stays empty.
+function absorbProfile(chats) {
+  if (!chats.length) return false;
+  let saved;
+  try {
+    saved = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+  } catch {
+    return false;
+  }
+  const note = profileNote(saved.profile);
+  if (!note) return false;
+  const limit = contextLimitOf(saved);
+  let filled = false;
+  for (const chat of chats) {
+    if (String(chat.context || '').trim()) continue;
+    chat.context = note.slice(0, limit);
+    filled = true;
+  }
+  delete saved.profile;
+  try {
+    const tmp = `${SETTINGS_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(saved, null, 2));
+    fs.renameSync(tmp, SETTINGS_FILE);
+  } catch {}
+  return filled;
+}
+
 function loadChats() {
   try {
     const data = JSON.parse(fs.readFileSync(CHATS_FILE, 'utf8'));
     const chats = (Array.isArray(data?.chats) ? data.chats : []).map(cleanChat).filter((c) => c.id);
-    return { activeId: String(data?.activeId || ''), chats: chats.slice(0, 60) };
+    const activeId = String(data?.activeId || '');
+    if (absorbProfile(chats)) return saveChats({ activeId, chats });
+    return { activeId, chats: chats.slice(0, 60) };
   } catch {
     return { activeId: '', chats: [] };
   }
@@ -676,6 +719,7 @@ function loadChats() {
 
 function saveChats(data) {
   const chats = (Array.isArray(data?.chats) ? data.chats : []).map(cleanChat).filter((c) => c.id).slice(0, 60);
+  absorbProfile(chats);
   const activeId = String(data?.activeId || '');
   const payload = { activeId: chats.some((c) => c.id === activeId) ? activeId : chats[0]?.id || '', chats };
   fs.mkdirSync(path.dirname(CHATS_FILE), { recursive: true });
@@ -688,32 +732,39 @@ function saveChats(data) {
 ipcMain.handle('chats-load', () => loadChats());
 ipcMain.handle('chats-save', (_e, data) => saveChats(data));
 
-// Widen the overlay while a code or design solution is on screen, then put the old size back.
-let solutionWindow = null;
-ipcMain.handle('fit-solution', (_e, open) => {
-  if (!win) return;
-  const bounds = win.getBounds();
-  if (open) {
-    if (solutionWindow || bounds.width >= 1040) return;
-    const work = screen.getPrimaryDisplay().workArea;
-    const next = Math.min(1120, work.width - 24);
-    if (next < bounds.width + 80) return;
-    solutionWindow = { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, target: next };
-    const x = Math.max(work.x, Math.min(bounds.x + bounds.width - next, work.x + work.width - next));
-    win.setBounds({ x, y: bounds.y, width: next, height: bounds.height });
-    return;
-  }
-  if (!solutionWindow) return;
-  const now = win.getBounds();
-  const prev = solutionWindow;
-  solutionWindow = null;
-  if (Math.abs(now.width - prev.target) > 48) return;
-  const work = screen.getPrimaryDisplay().workArea;
-  const x = Math.max(work.x, Math.min(prev.x, work.x + work.width - prev.width));
-  win.setBounds({ x, y: now.y, width: prev.width, height: now.height });
-});
-
 ipcMain.handle('get-settings', () => currentSettings());
+
+async function probeKey(url, key) {
+  if (!String(key || '').trim()) return 'No key';
+  if (!String(url || '').trim()) return 'No URL';
+  try {
+    const res = await fetch(`${url}/models`, {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (res.ok) return '';
+    if (res.status === 401 || res.status === 403) return 'Key rejected';
+    return `Server said ${res.status}`;
+  } catch {
+    return 'Could not reach the server';
+  }
+}
+
+// Checks the keys in the form, including a blank field that still inherits the shared key.
+ipcMain.handle('check-keys', async (_e, patch) => {
+  const settings = fillEndpoints({ ...loadSettings(), ...(patch || {}) });
+  const labels = { speech: 'Speech', text: 'Text', vision: 'Images' };
+  const seen = new Map();
+  const lines = [];
+  for (const kind of ['speech', 'text', 'vision']) {
+    const ep = endpoint(settings, kind);
+    const id = `${ep.url}\n${ep.key}`;
+    if (!seen.has(id)) seen.set(id, probeKey(ep.url, ep.key));
+    const problem = await seen.get(id);
+    lines.push({ kind, label: labels[kind], ok: !problem, message: problem || 'Key works' });
+  }
+  return lines;
+});
 ipcMain.handle('save-settings', (_e, settings) => saveSettings(settings));
 
 ipcMain.handle('ask', async (_e, payload) =>

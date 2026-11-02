@@ -5,7 +5,7 @@
 #   1. uses your Node.js 20+ if you have it, otherwise downloads a private copy (checksum verified)
 #   2. downloads EasySobes and installs Electron
 #   3. adds the `sobes` command to your PATH
-#   4. runs `sobes setup` (API key, profile, resume) unless you already did it
+#   4. runs `sobes setup` (API key) unless you already did it
 # Running it again updates EasySobes and keeps your settings.
 
 function Install-EasySobes {
@@ -111,7 +111,7 @@ function Install-EasySobes {
 
   Write-Host ''
   Write-Host 'Done! From now on, open PowerShell or Command Prompt and type:  sobes' -ForegroundColor Green
-  Write-Host '   sobes setup    change your API key, profile or resume'
+  Write-Host '   sobes setup    change your API key'
   Write-Host '   sobes update   get the latest version'
 }
 
