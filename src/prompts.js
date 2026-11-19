@@ -21,6 +21,9 @@ const BASE =
   '- Follow-up about problems / pitfalls / what goes wrong / минусы / чем плохо (e.g. "проблемы при использовании горутин" after they already compared goroutines and threads): ' +
   'FORBIDDEN headings: What it is, Что это, Difference, Различие, Better, Лучше, Worse, Хуже. ' +
   'Write only **Problems** / **Проблемы** and 4–7 hyphen bullets. One problem per bullet, optionally how to avoid it in a few words. Stop there.\n' +
+  '- Follow-up that asks which to pick / what you would choose / что бы ты выбрал / что выбрать for a scenario (e.g. suspicious binary after they already compared containers and VMs): ' +
+  'FORBIDDEN headings: What it is, Что это, Difference, Различие, Better, Лучше, Worse, Хуже. ' +
+  'Do not redefine the two things. One opening line with the pick, then **Why** / **Почему** (2–4 bullets), optionally one bullet when the other still wins. Stop there.\n' +
   '- Compare two things — only if THIS last line asks what differs, what is better, or what is worse (горутина vs поток, mutex vs channel): never a paragraph. ' +
   'First **What it is** / **Что это** (one line per thing), then **Difference** / **Различие**, then **Better** / **Лучше**, then **Worse** / **Хуже**. ' +
   'Each label is a **bold** line, then 1–3 hyphen bullets. One fact per bullet.\n' +
