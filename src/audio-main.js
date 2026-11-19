@@ -35,9 +35,9 @@ module.exports = function setupAudio({ win, ipcMain, loadSettings, getSources })
   // Keep VAD timers running at full speed while the overlay is hidden.
   win.webContents.setBackgroundThrottling(false);
 
-  // getDisplayMedia() from our renderer → grant a screen video track (the renderer
-  // stops it immediately; no frame is ever read or sent) plus system audio loopback.
-  // No picker is shown. The 0×0 thumbnail means no screen image is made here.
+  // Live asks for audio only. On macOS 14.2+ Chromium uses a Core Audio tap, so
+  // there is no screen session and no menu-bar "sharing" pill. Video is granted
+  // only if the renderer still had to fall back to a display-media video track.
   session.defaultSession.setDisplayMediaRequestHandler(
     async (request, callback) => {
       try {
@@ -54,8 +54,6 @@ module.exports = function setupAudio({ win, ipcMain, loadSettings, getSources })
           } catch (err) {
             console.error('[audio] desktopCapturer failed:', err.message);
           }
-          // Without Screen Recording permission there may be no screen source;
-          // our own frame is a valid video source too (the track is discarded anyway).
           if (!video && request.frame) video = request.frame;
           if (video) streams.video = video;
         }

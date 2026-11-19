@@ -38,17 +38,24 @@
   }
 
   async function getSystemStream() {
-    // Chromium requires video for getDisplayMedia; audio-main grants it and we drop it.
-    const display = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
-    display.getVideoTracks().forEach((t) => {
-      t.stop();
-      display.removeTrack(t);
-    });
-    if (!display.getAudioTracks().length) {
-      display.getTracks().forEach((t) => t.stop());
-      throw new Error('no system audio track was provided');
+    const dropVideo = (display) => {
+      display.getVideoTracks().forEach((t) => {
+        t.stop();
+        display.removeTrack(t);
+      });
+      if (!display.getAudioTracks().length) {
+        display.getTracks().forEach((t) => t.stop());
+        throw new Error('no system audio track was provided');
+      }
+      return new MediaStream(display.getAudioTracks());
+    };
+    // Prefer audio-only so macOS does not start a screen-share session.
+    try {
+      return dropVideo(await navigator.mediaDevices.getDisplayMedia({ audio: true, video: false }));
+    } catch (err) {
+      window.sobes.send?.('log', `live: audio-only capture failed (${err.message || err.name}), trying with video`);
+      return dropVideo(await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true }));
     }
-    return new MediaStream(display.getAudioTracks());
   }
 
   // Returns { stream, source, stop() } for system audio. Never falls back to the mic.
@@ -83,12 +90,33 @@
   // collects the samples and each segment goes to Whisper as a 16 kHz mono WAV.
 
   const MAX_BUFFER_S = 300; // hard cap on buffered audio (manual recording)
+  const WORKLET_URL = new URL('pcm-worklet.js', window.location.href).href;
+  const loadedWorklets = new WeakSet();
 
-  function pcmTap(ctx, stream) {
+  function openAudioContext() {
+    let ctx;
+    try {
+      ctx = new AudioContext({ sampleRate: 16000 });
+    } catch {
+      ctx = new AudioContext();
+    }
+    ctx.resume().catch(() => {});
+    return ctx;
+  }
+
+  function wireTap(src, node, ctx) {
+    const mute = ctx.createGain();
+    mute.gain.value = 0;
+    src.connect(node);
+    node.connect(mute);
+    mute.connect(ctx.destination);
+    return { src, node, mute };
+  }
+
+  function scriptPcmTap(ctx, stream) {
     const src = ctx.createMediaStreamSource(stream);
     const node = ctx.createScriptProcessor(4096, 1, 1);
-    const mute = ctx.createGain();
-    mute.gain.value = 0; // the node only runs while connected to the output; keep it silent
+    const { mute } = wireTap(src, node, ctx);
     let chunks = [];
     let length = 0;
     node.onaudioprocess = (e) => {
@@ -102,12 +130,8 @@
       length += out.length;
       while (length > ctx.sampleRate * MAX_BUFFER_S) length -= chunks.shift().length;
     };
-    src.connect(node);
-    node.connect(mute);
-    mute.connect(ctx.destination);
     return {
       src,
-      seconds: () => length / ctx.sampleRate,
       take() {
         const all = new Float32Array(length);
         let o = 0;
@@ -117,10 +141,8 @@
         }
         chunks = [];
         length = 0;
-        return all;
+        return Promise.resolve(all);
       },
-      // Drop old audio but keep the last `keepS` seconds, so a word that starts
-      // right at a segment boundary isn't clipped.
       clear(keepS = 0) {
         const keep = Math.round(ctx.sampleRate * keepS);
         while (chunks.length && length - chunks[0].length >= keep) length -= chunks.shift().length;
@@ -136,6 +158,54 @@
         mute.disconnect();
       },
     };
+  }
+
+  async function workletPcmTap(ctx, stream) {
+    if (!loadedWorklets.has(ctx)) {
+      await ctx.audioWorklet.addModule(WORKLET_URL);
+      loadedWorklets.add(ctx);
+    }
+    const src = ctx.createMediaStreamSource(stream);
+    const node = new AudioWorkletNode(ctx, 'pcm-tap');
+    const { mute } = wireTap(src, node, ctx);
+    let nextId = 1;
+    const waiting = new Map();
+    node.port.onmessage = (e) => {
+      const { id, samples } = e.data || {};
+      const resolve = waiting.get(id);
+      if (!resolve) return;
+      waiting.delete(id);
+      resolve(samples || new Float32Array(0));
+    };
+    return {
+      src,
+      take() {
+        const id = nextId++;
+        return new Promise((resolve) => {
+          waiting.set(id, resolve);
+          node.port.postMessage({ type: 'take', id });
+        });
+      },
+      clear(keepS = 0) {
+        node.port.postMessage({ type: 'clear', keepS });
+      },
+      stop() {
+        for (const resolve of waiting.values()) resolve(new Float32Array(0));
+        waiting.clear();
+        src.disconnect();
+        node.disconnect();
+        mute.disconnect();
+      },
+    };
+  }
+
+  async function pcmTap(ctx, stream) {
+    try {
+      return await workletPcmTap(ctx, stream);
+    } catch (err) {
+      window.sobes.send?.('log', `live: audio worklet failed (${err.message || err}), using script processor`);
+      return scriptPcmTap(ctx, stream);
+    }
   }
 
   function toWav(samples, rate) {
@@ -189,11 +259,11 @@
     }
   }
 
-  function stopManual() {
+  async function stopManual() {
     const m = manual;
     manual = null;
     clearInterval(m.timer);
-    const samples = m.tap.take();
+    const samples = await m.tap.take();
     m.tap.stop();
     m.ctx.close().catch(() => {});
     m.capture.stop();
@@ -224,9 +294,16 @@
       emit({ mode: 'off', level: 0, source: getSource() });
       return;
     }
-    const ctx = new AudioContext();
-    ctx.resume().catch(() => {});
-    const tap = pcmTap(ctx, capture.stream);
+    const ctx = openAudioContext();
+    let tap;
+    try {
+      tap = await pcmTap(ctx, capture.stream);
+    } catch (err) {
+      ctx.close().catch(() => {});
+      capture.stop();
+      emit({ mode: 'off', level: 0, source: getSource() });
+      return setStatus(`Audio tap failed: ${err.message || err}`);
+    }
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
     tap.src.connect(analyser);
@@ -419,8 +496,8 @@
     retryTimer = setTimeout(() => startLive(true), wait);
   }
 
-  function makeEar(role, stream, ctx) {
-    const tap = pcmTap(ctx, stream);
+  async function makeEar(role, stream, ctx) {
+    const tap = await pcmTap(ctx, stream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
     tap.src.connect(analyser);
@@ -436,6 +513,7 @@
       speaking: false,
       lastVoice: 0,
       forceCut: false,
+      cutting: false,
       peak: 0,
     };
   }
@@ -457,9 +535,22 @@
     starting = false;
     if (!wantLive) return system.stop();
 
-    const ctx = new AudioContext();
-    ctx.resume().catch(() => {});
-    const ears = [makeEar('interviewer', system.stream, ctx)];
+    const ctx = openAudioContext();
+    let ears;
+    try {
+      ears = [await makeEar('interviewer', system.stream, ctx)];
+    } catch (err) {
+      ctx.close().catch(() => {});
+      system.stop();
+      recover(`pcm tap failed (${err.message || err})`);
+      return;
+    }
+    if (!wantLive) {
+      ears.forEach((e) => e.tap.stop());
+      ctx.close().catch(() => {});
+      system.stop();
+      return;
+    }
     const l = { ctx, ears, system, timer: null };
     live = l;
     system.stream.getAudioTracks().forEach((t) =>
@@ -529,8 +620,9 @@
   }
 
   // Hand this speaker's current segment off (if someone spoke) and start the next one.
-  function cutEar(ear) {
-    if (!live || !live.ears.includes(ear)) return;
+  async function cutEar(ear) {
+    if (!live || !live.ears.includes(ear) || ear.cutting) return;
+    ear.cutting = true;
     const hadSpeech = ear.speechMs >= MIN_SPEECH_MS;
     const force = ear.forceCut;
     ear.forceCut = false;
@@ -542,13 +634,17 @@
         }`
       );
     }
-    if (hadSpeech || force) {
-      const samples = ear.tap.take();
-      if (samples.length >= ear.rate * 0.3) enqueue({ buffer: toWav(samples, ear.rate), role: ear.role, force });
-    } else {
-      ear.tap.clear(0.5);
+    try {
+      if (hadSpeech || force) {
+        const samples = await ear.tap.take();
+        if (samples.length >= ear.rate * 0.3) enqueue({ buffer: toWav(samples, ear.rate), role: ear.role, force });
+      } else {
+        ear.tap.clear(0.5);
+      }
+    } finally {
+      if (live && live.ears.includes(ear)) newSegment(ear);
+      ear.cutting = false;
     }
-    newSegment(ear);
   }
 
   function tick() {
