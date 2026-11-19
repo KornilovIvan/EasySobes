@@ -113,51 +113,106 @@
     return { src, node, mute };
   }
 
+  const PRE_ROLL_S = 0.4;
+
+  function concatChunks(chunks, length) {
+    const all = new Float32Array(length);
+    let o = 0;
+    for (const c of chunks) {
+      all.set(c, o);
+      o += c.length;
+    }
+    return all;
+  }
+
   function scriptPcmTap(ctx, stream) {
     const src = ctx.createMediaStreamSource(stream);
     const node = ctx.createScriptProcessor(4096, 1, 1);
     const { mute } = wireTap(src, node, ctx);
+    const preCap = Math.max(1, Math.round(ctx.sampleRate * PRE_ROLL_S));
+    const pre = new Float32Array(preCap);
+    let prePos = 0;
+    let preFilled = 0;
+    let recording = false;
     let chunks = [];
     let length = 0;
+    const tap = { src, rms: 0 };
+
+    function dumpPre() {
+      if (!preFilled) return;
+      const out = new Float32Array(preFilled);
+      const start = (prePos - preFilled + preCap) % preCap;
+      const first = Math.min(preFilled, preCap - start);
+      out.set(pre.subarray(start, start + first));
+      if (first < preFilled) out.set(pre.subarray(0, preFilled - first), first);
+      chunks.push(out);
+      length += preFilled;
+      preFilled = 0;
+      prePos = 0;
+    }
+
+    function writePre(srcBuf) {
+      const n = srcBuf.length;
+      if (n >= preCap) {
+        pre.set(srcBuf.subarray(n - preCap));
+        prePos = 0;
+        preFilled = preCap;
+        return;
+      }
+      const first = Math.min(n, preCap - prePos);
+      pre.set(srcBuf.subarray(0, first), prePos);
+      if (first < n) pre.set(srcBuf.subarray(first), 0);
+      prePos = (prePos + n) % preCap;
+      preFilled = Math.min(preCap, preFilled + n);
+    }
+
     node.onaudioprocess = (e) => {
       const input = e.inputBuffer;
-      const out = new Float32Array(input.length);
-      for (let c = 0; c < input.numberOfChannels; c++) {
-        const d = input.getChannelData(c);
-        for (let i = 0; i < d.length; i++) out[i] += d[i] / input.numberOfChannels;
+      const n = input.length;
+      const nch = input.numberOfChannels;
+      const out = new Float32Array(n);
+      let ss = 0;
+      for (let i = 0; i < n; i++) {
+        let s = 0;
+        for (let c = 0; c < nch; c++) s += input.getChannelData(c)[i];
+        s /= nch;
+        out[i] = s;
+        ss += s * s;
       }
-      chunks.push(out);
-      length += out.length;
-      while (length > ctx.sampleRate * MAX_BUFFER_S) length -= chunks.shift().length;
+      tap.rms = Math.sqrt(ss / n);
+      if (recording) {
+        chunks.push(out);
+        length += n;
+        while (length > ctx.sampleRate * MAX_BUFFER_S) length -= chunks.shift().length;
+      } else {
+        writePre(out);
+      }
     };
-    return {
-      src,
-      take() {
-        const all = new Float32Array(length);
-        let o = 0;
-        for (const c of chunks) {
-          all.set(c, o);
-          o += c.length;
-        }
-        chunks = [];
-        length = 0;
-        return Promise.resolve(all);
-      },
-      clear(keepS = 0) {
-        const keep = Math.round(ctx.sampleRate * keepS);
-        while (chunks.length && length - chunks[0].length >= keep) length -= chunks.shift().length;
-        if (!keep) {
-          chunks = [];
-          length = 0;
-        }
-      },
-      stop() {
-        node.onaudioprocess = null;
-        src.disconnect();
-        node.disconnect();
-        mute.disconnect();
-      },
+
+    tap.record = (on) => {
+      if (on && !recording) dumpPre();
+      recording = !!on;
     };
+    tap.take = () => {
+      if (!recording) dumpPre();
+      const all = concatChunks(chunks, length);
+      chunks = [];
+      length = 0;
+      recording = false;
+      return Promise.resolve(all);
+    };
+    tap.clear = () => {
+      chunks = [];
+      length = 0;
+      recording = false;
+    };
+    tap.stop = () => {
+      node.onaudioprocess = null;
+      src.disconnect();
+      node.disconnect();
+      mute.disconnect();
+    };
+    return tap;
   }
 
   async function workletPcmTap(ctx, stream) {
@@ -170,33 +225,35 @@
     const { mute } = wireTap(src, node, ctx);
     let nextId = 1;
     const waiting = new Map();
+    const tap = { src, rms: 0 };
     node.port.onmessage = (e) => {
-      const { id, samples } = e.data || {};
-      const resolve = waiting.get(id);
+      const msg = e.data || {};
+      if (msg.type === 'level') {
+        tap.rms = msg.rms || 0;
+        return;
+      }
+      const resolve = waiting.get(msg.id);
       if (!resolve) return;
-      waiting.delete(id);
-      resolve(samples || new Float32Array(0));
+      waiting.delete(msg.id);
+      resolve(msg.samples || new Float32Array(0));
     };
-    return {
-      src,
-      take() {
-        const id = nextId++;
-        return new Promise((resolve) => {
-          waiting.set(id, resolve);
-          node.port.postMessage({ type: 'take', id });
-        });
-      },
-      clear(keepS = 0) {
-        node.port.postMessage({ type: 'clear', keepS });
-      },
-      stop() {
-        for (const resolve of waiting.values()) resolve(new Float32Array(0));
-        waiting.clear();
-        src.disconnect();
-        node.disconnect();
-        mute.disconnect();
-      },
+    tap.record = (on) => node.port.postMessage({ type: 'record', on: !!on });
+    tap.take = () => {
+      const id = nextId++;
+      return new Promise((resolve) => {
+        waiting.set(id, resolve);
+        node.port.postMessage({ type: 'take', id });
+      });
     };
+    tap.clear = () => node.port.postMessage({ type: 'clear' });
+    tap.stop = () => {
+      for (const resolve of waiting.values()) resolve(new Float32Array(0));
+      waiting.clear();
+      src.disconnect();
+      node.disconnect();
+      mute.disconnect();
+    };
+    return tap;
   }
 
   async function pcmTap(ctx, stream) {
@@ -304,15 +361,9 @@
       emit({ mode: 'off', level: 0, source: getSource() });
       return setStatus(`Audio tap failed: ${err.message || err}`);
     }
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 2048;
-    tap.src.connect(analyser);
-    const data = new Float32Array(analyser.fftSize);
+    tap.record(true);
     const timer = setInterval(() => {
-      analyser.getFloatTimeDomainData(data);
-      let sum = 0;
-      for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
-      const r = Math.sqrt(sum / data.length);
+      const r = tap.rms || 0;
       emit({ level: meterLevel(r), phase: r > MIN_THRESHOLD ? 'speech' : 'idle' });
     }, 80);
     manual = { capture, ctx, tap, timer };
@@ -498,14 +549,9 @@
 
   async function makeEar(role, stream, ctx) {
     const tap = await pcmTap(ctx, stream);
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 2048;
-    tap.src.connect(analyser);
     return {
       role,
       tap,
-      analyser,
-      data: new Float32Array(analyser.fftSize),
       rate: ctx.sampleRate,
       noise: 0.005,
       recStart: 0,
@@ -515,6 +561,7 @@
       forceCut: false,
       cutting: false,
       peak: 0,
+      armed: false,
     };
   }
 
@@ -606,17 +653,12 @@
   const diag = (msg) => window.sobes.send?.('log', `live: ${msg}`);
 
   function newSegment(ear) {
+    if (ear.armed) ear.tap.record(false);
+    ear.armed = false;
     ear.peak = 0;
     ear.recStart = performance.now();
     ear.speechMs = 0;
     ear.speaking = false;
-  }
-
-  function earRms(ear) {
-    ear.analyser.getFloatTimeDomainData(ear.data);
-    let sum = 0;
-    for (let i = 0; i < ear.data.length; i++) sum += ear.data[i] * ear.data[i];
-    return Math.sqrt(sum / ear.data.length);
   }
 
   // Hand this speaker's current segment off (if someone spoke) and start the next one.
@@ -639,7 +681,7 @@
         const samples = await ear.tap.take();
         if (samples.length >= ear.rate * 0.3) enqueue({ buffer: toWav(samples, ear.rate), role: ear.role, force });
       } else {
-        ear.tap.clear(0.5);
+        ear.tap.clear();
       }
     } finally {
       if (live && live.ears.includes(ear)) newSegment(ear);
@@ -654,24 +696,32 @@
     let loud = 0;
     let anyVoice = false;
     for (const ear of l.ears) {
-      const level = earRms(ear);
+      const level = ear.tap.rms || 0;
       if (level > loud) loud = level;
       if (level > ear.peak) ear.peak = level;
       const threshold = Math.max(MIN_THRESHOLD, ear.noise * 3);
       const voiced = level > threshold;
       if (voiced || ear.speaking) anyVoice = true;
       if (voiced) {
+        if (!ear.armed) {
+          ear.tap.record(true);
+          ear.armed = true;
+        }
         ear.lastVoice = now;
         ear.speechMs += TICK_MS;
         if (!ear.speaking && ear.speechMs >= MIN_SPEECH_MS) ear.speaking = true;
       } else {
+        if (ear.armed) {
+          ear.tap.record(false);
+          ear.armed = false;
+        }
         ear.noise = level < ear.noise ? level : ear.noise * 0.995 + level * 0.005;
       }
       const segAge = now - ear.recStart;
       const silenceMs = INTERVIEWER_SILENCE_MS;
       if (ear.speaking && now - ear.lastVoice >= silenceMs) cutEar(ear);
       else if (segAge >= MAX_SEGMENT_MS && ear.speechMs > 0) cutEar(ear);
-      else if (!ear.speaking && segAge >= IDLE_ROTATE_MS && now - ear.lastVoice >= silenceMs) cutEar(ear);
+      else if (!ear.speaking && segAge >= IDLE_ROTATE_MS) newSegment(ear);
     }
     if (held) {
       if (anyVoice || processing) held.until = now + HOLD_MS;
