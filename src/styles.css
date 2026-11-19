@@ -463,6 +463,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   max-width: 100%;
   margin: 0;
   line-height: 1.55;
+  tab-size: 4;
 }
 .artifact-body pre code { background: none; border: 0; padding: 0; font-size: 0.82em; color: var(--code-fg); }
 
@@ -617,6 +618,7 @@ kbd {
   overflow-x: auto;
   margin: 0;
   line-height: 1.55;
+  tab-size: 4;
 }
 .msg.bot pre code { background: none; border: 0; padding: 0; font-size: 0.82em; color: var(--code-fg); }
 
@@ -731,7 +733,7 @@ pre code .syn-cmt { font-style: italic; }
 .context-preview .h { font-weight: 700; margin: 12px 0 4px; }
 .context-preview ul, .context-preview ol { padding-left: 20px; margin: 6px 0; }
 .context-preview code { font-family: var(--mono); font-size: 0.84em; color: var(--code-fg); background: var(--surface-2); border: 1px solid var(--line); padding: 1px 5px; border-radius: 5px; }
-.context-preview pre { background: var(--code-bg); border: 1px solid var(--line); padding: 12px; border-radius: 10px; overflow-x: auto; margin: 0; line-height: 1.55; }
+.context-preview pre { background: var(--code-bg); border: 1px solid var(--line); padding: 12px; border-radius: 10px; overflow-x: auto; margin: 0; line-height: 1.55; tab-size: 4; }
 .context-preview pre code { background: none; border: 0; padding: 0; font-size: 0.9em; color: var(--code-fg); }
 .context-empty { margin: 0; color: var(--muted); }
 .context-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-shrink: 0; }
