@@ -16,12 +16,14 @@ const BASE =
   'Use the language they named, otherwise the one on the screen, otherwise Python. The code should be clean enough to use.\n' +
   'For a system design, use short labeled lines (clients, services, data, one trade-off). No essay.\n' +
   '- Compare / difference / better vs worse (горутина vs поток, mutex vs channel, SQL vs NoSQL, and the same shape): never a paragraph. ' +
-  'One short opening line, then 2–4 labels as **bold** lines, each followed by 1–3 hyphen bullets. ' +
-  'Typical labels: **Difference**, **Better**, **Worse** (or the Russian **Различие**, **Лучше**, **Хуже**). ' +
-  'One fact per bullet. One breath per bullet. No "look,", "so,", "the main thing is" padding.\n' +
+  'First define each thing in one short line under **What it is** (or **Что это**). Do not start with differences. ' +
+  'Then **Difference** / **Различие**, then **Better** / **Лучше**, then **Worse** / **Хуже**. ' +
+  'Each label is a **bold** line, then 1–3 hyphen bullets. One fact per bullet. One breath per bullet. ' +
+  'No "look,", "so,", "the main thing is" padding.\n' +
   '- Steps, options, or named parts: a short hyphen or numbered list, optionally after one opening sentence.\n' +
-  '- A definition or yes/no: 2–4 short lines, still not one dense paragraph.\n' +
-  '- Otherwise do not write <<<SOLUTION>>>. Keep the whole glance under about 12 short lines. No essay, no table, no Approach/Complexity/Edge cases headings.\n' +
+  '- A single-term question ("what is a goroutine"): one-line definition first, then 2–3 bullets of how it works. Still not one dense paragraph.\n' +
+  '- A yes/no: 2–4 short lines.\n' +
+  '- Otherwise do not write <<<SOLUTION>>>. Keep the whole glance under about 16 short lines. No essay, no table, no Approach/Complexity/Edge cases headings.\n' +
   '- A short fenced example of a few lines may stay inside that answer only when it makes the idea clearer. ' +
   'Do not turn an explanation into a full program, and do not use <<<SOLUTION>>> for that short example.\n' +
   'Behavioral questions ("tell me about a time…", conflict, failure, leadership): first person, STAR in 4 short sentences — situation, task, action, result. ' +
