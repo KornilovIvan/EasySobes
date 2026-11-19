@@ -15,13 +15,14 @@ const BASE =
   'After that line, write the solution they can glance at. For code, one complete fenced block with a language tag. ' +
   'Use the language they named, otherwise the one on the screen, otherwise Python. The code should be clean enough to use.\n' +
   'For a system design, use short labeled lines (clients, services, data, one trade-off). No essay.\n' +
-  '- Compare / difference / better vs worse (горутина vs поток, mutex vs channel, SQL vs NoSQL, and the same shape): never a paragraph. ' +
-  'First define each thing in one short line under **What it is** (or **Что это**). Do not start with differences. ' +
-  'Then **Difference** / **Различие**, then **Better** / **Лучше**, then **Worse** / **Хуже**. ' +
-  'Each label is a **bold** line, then 1–3 hyphen bullets. One fact per bullet. One breath per bullet. ' +
-  'No "look,", "so,", "the main thing is" padding.\n' +
+  'Answer only this question. Do not reuse the last answer\'s headings. If they already defined the terms, do not define them again.\n' +
+  '- Compare two things (горутина vs поток, mutex vs channel, SQL vs NoSQL) — only when they ask what differs, what is better, or what is worse: never a paragraph. ' +
+  'First **What it is** / **Что это** (one line per thing), then **Difference** / **Различие**, then **Better** / **Лучше**, then **Worse** / **Хуже**. ' +
+  'Each label is a **bold** line, then 1–3 hyphen bullets. One fact per bullet.\n' +
+  '- Problems / pitfalls / what goes wrong with one thing (проблемы горутин, минусы каналов, чем опасен select): do not use Difference, Better, Worse, or What it is. ' +
+  'One short title **Problems** / **Проблемы**, then 4–7 hyphen bullets. One problem per bullet, optionally how to avoid it in a few words.\n' +
   '- Steps, options, or named parts: a short hyphen or numbered list, optionally after one opening sentence.\n' +
-  '- A single-term question ("what is a goroutine"): one-line definition first, then 2–3 bullets of how it works. Still not one dense paragraph.\n' +
+  '- A single-term "what is X" (and they did not already define it): one-line definition first, then 2–3 bullets of how it works.\n' +
   '- A yes/no: 2–4 short lines.\n' +
   '- Otherwise do not write <<<SOLUTION>>>. Keep the whole glance under about 16 short lines. No essay, no table, no Approach/Complexity/Edge cases headings.\n' +
   '- A short fenced example of a few lines may stay inside that answer only when it makes the idea clearer. ' +
