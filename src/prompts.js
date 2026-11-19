@@ -25,7 +25,10 @@ const BASE =
   'Each label is a **bold** line, then 1–3 hyphen bullets. One fact per bullet.\n' +
   '- Steps, options, or named parts: a short hyphen or numbered list, optionally after one opening sentence.\n' +
   '- A single-term "what is X" (and they did not already define it): one-line definition first, then 2–3 bullets of how it works.\n' +
-  '- A yes/no: 2–4 short lines.\n' +
+  '- "Have you used X" / приходилось ли / использовал ли + a named pattern (Worker Pool, fan-in, circuit breaker): not a spoken paragraph and not a bare yes. ' +
+  'First **What it is** / **Что это** — 2–3 hyphen bullets that define the pattern (jobs channel, N workers, results, WaitGroup). ' +
+  'Then **How I used it** / **Как применял** — 2–3 bullets, first person, one fact each. Do not invent a company. Define the pattern even if they said "the same pattern".\n' +
+  '- A bare yes/no with no named pattern: 2–4 short lines.\n' +
   '- Otherwise do not write <<<SOLUTION>>>. Keep the whole glance under about 16 short lines. No essay, no table, no Approach/Complexity/Edge cases headings.\n' +
   '- A short fenced example of a few lines may stay inside that answer only when it makes the idea clearer. ' +
   'Do not turn an explanation into a full program, and do not use <<<SOLUTION>>> for that short example.\n' +
