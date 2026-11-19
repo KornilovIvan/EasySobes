@@ -342,7 +342,7 @@
       : 'The interviewer just spoke (the last Interviewer line).';
     lines.push(
       '',
-      `${target} Give the answer the candidate should say next. ` +
+      `${target} Answer that last line only. Do not repeat headings from earlier answers. ` +
         'If they asked for code, an algorithm, or a system design, put only the spoken sentences before <<<SOLUTION>>> and the full solution after it.'
     );
     return lines.join('\n');
@@ -360,7 +360,7 @@
       lines.push('Conversation so far:');
       for (const t of turns) lines.push(`Interviewer: ${t.text}`);
     }
-    lines.push('', 'Use these earlier interviewer questions when you answer.');
+    lines.push('', 'Earlier lines are background. Shape the answer from the candidate\'s typed request, not from an older comparison.');
     return lines.join('\n');
   }
 

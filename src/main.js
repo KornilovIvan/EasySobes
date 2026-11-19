@@ -400,8 +400,8 @@ const SCREEN_ASK =
 // Appended only when the request includes the interviewer's transcript.
 const DIALOGUE =
   'DIALOGUE: The user message includes what the interviewer said. ' +
-  'Reply with the words the candidate should say next. ' +
-  'If that question asks them to write or fix code, write an algorithm, or design a system — including "напишите алгоритм" — ' +
+  'Answer only the last interviewer line. Earlier lines are background, not a template to repeat. ' +
+  'If that last line asks them to write or fix code, write an algorithm, or design a system — including "напишите алгоритм" — ' +
   'put only the spoken sentences before <<<SOLUTION>>> and the full solution after it.';
 
 function buildMessages(userContent, settings, dialogue) {
