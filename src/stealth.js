@@ -93,7 +93,8 @@ module.exports = function setupStealth({ win, app, globalShortcut, ipcMain, getS
 
   // ---------- content protection ----------
   function protect() {
-    if (alive()) win.setContentProtection(true);
+    if (!alive()) return;
+    win.setContentProtection(true);
   }
 
   // ---------- features ----------
@@ -173,6 +174,8 @@ module.exports = function setupStealth({ win, app, globalShortcut, ipcMain, getS
     }
   }
   protect();
+  // Zoom's "Auto" capture sometimes drops the sharingType flag until it is set again.
+  const protectTimer = setInterval(protect, 2000);
 
   // ---------- events ----------
   win.on('show', protect);
@@ -197,6 +200,7 @@ module.exports = function setupStealth({ win, app, globalShortcut, ipcMain, getS
   screen.on('display-added', onDisplayChange);
   screen.on('display-removed', onDisplayChange);
   win.on('closed', () => {
+    clearInterval(protectTimer);
     screen.removeListener('display-metrics-changed', onDisplayChange);
     screen.removeListener('display-added', onDisplayChange);
     screen.removeListener('display-removed', onDisplayChange);

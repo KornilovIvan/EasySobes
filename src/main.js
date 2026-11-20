@@ -148,6 +148,7 @@ function createWindow() {
     hasShadow: false,
     skipTaskbar: true,
     alwaysOnTop: true,
+    hiddenInMissionControl: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -176,9 +177,18 @@ function createWindow() {
   // A fullscreenable window that sits on every Space cannot become the key window,
   // so the question field never receives keys until something else activates the app.
   win.setFullScreenable(false);
-  win.setAlwaysOnTop(true, 'screen-saver');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  pinOverlay('screen-saver');
+  win.on('ready-to-show', () => pinOverlay('screen-saver'));
   win.loadFile(path.join(__dirname, 'index.html'));
+}
+
+// Zoom and ScreenCaptureKit drop NSWindowSharingNone when the window level changes.
+// Always-on-top and content protection have to be set together, protection last.
+function pinOverlay(level = 'screen-saver') {
+  if (!win || win.isDestroyed()) return;
+  win.setAlwaysOnTop(true, level);
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.setContentProtection(true);
 }
 
 function toggleWindow() {
@@ -196,14 +206,12 @@ function moveWindow(dx, dy) {
 // restore the level. The window stays key, so the field can take keys with Live off.
 function focusForTyping() {
   if (!win || win.isDestroyed()) return;
-  win.setAlwaysOnTop(true, 'floating');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  pinOverlay('floating');
   if (!win.isVisible()) win.show();
   if (process.platform === 'darwin') app.focus({ steal: true });
   win.focus();
   win.webContents.focus();
-  win.setAlwaysOnTop(true, 'screen-saver');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  pinOverlay('screen-saver');
 }
 
 // ---------- Screen capture (ONLY on an explicit ask: ⌘⇧Return or the 🖥 button) ----------
@@ -400,9 +408,11 @@ const SCREEN_ASK =
 // Appended only when the request includes the interviewer's transcript.
 const DIALOGUE =
   'DIALOGUE: The user message includes what the interviewer said. ' +
-  'Answer only the last interviewer line. Earlier lines are background, not a template to repeat. ' +
-  'If that last line asks them to write or fix code, write an algorithm, or design a system — including "напишите алгоритм" — ' +
-  'put only the spoken sentences before <<<SOLUTION>>> and the full solution after it.';
+  'Answer only THIS QUESTION / the last interviewer line. Earlier lines are background. ' +
+  'Do not finish an earlier skipped or unfinished task. ' +
+  'If THIS last line asks them to write or fix code, write an algorithm, or design a system — including "напишите алгоритм" — ' +
+  'put only the spoken sentences before <<<SOLUTION>>> and the full solution after it. ' +
+  'Otherwise do not write <<<SOLUTION>>>.';
 
 function buildMessages(userContent, settings, dialogue) {
   let content = systemPrompt(settings);
