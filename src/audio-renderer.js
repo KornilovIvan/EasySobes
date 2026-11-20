@@ -455,24 +455,39 @@
     );
   }
 
+  function wantsCode(line) {
+    return /напиш|реализу|исправ|спроектир|алгоритм|implement|debug|\bwrite\b|\bfix\b|complete the|design a system/i.test(
+      String(line || '')
+    );
+  }
+
   function dialogueText(focus = '') {
     const lines = [];
     const context = contextBlock();
     if (context) lines.push(context);
     if (conversation.summary) lines.push(`Earlier in this interview:\n${conversation.summary}`);
     const turns = turnsForModel();
-    if (turns.length) {
-      lines.push('Conversation:');
-      for (const t of turns) lines.push(`Interviewer: ${t.text}`);
+    const last = String(focus || (turns.length ? turns[turns.length - 1].text : '')).trim();
+    const earlier = last
+      ? turns.filter((t) => t.text !== last)
+      : turns.slice(0, Math.max(0, turns.length - 1));
+    if (earlier.length) {
+      lines.push(
+        'Earlier interviewer lines — background only. Do not answer them. Do not finish a skipped or unfinished task from them:'
+      );
+      for (const t of earlier) lines.push(`- ${t.text}`);
     }
-    const target = focus
-      ? `Answer this interviewer line: "${clip(focus)}".`
-      : 'The interviewer just spoke (the last Interviewer line).';
-    lines.push(
-      '',
-      `${target} Answer that last line only. Do not repeat headings from earlier answers. ` +
-        'If they asked for code, an algorithm, or a system design, put only the spoken sentences before <<<SOLUTION>>> and the full solution after it.'
-    );
+    if (last) {
+      lines.push('', 'THIS QUESTION — answer only this:', last);
+    } else {
+      lines.push('', 'The interviewer just spoke. Answer that last line only.');
+    }
+    lines.push('', 'Do not repeat headings from earlier answers.');
+    if (wantsCode(last)) {
+      lines.push(
+        'This last line asks for code or a design: spoken sentences first, then <<<SOLUTION>>>, then the solution.'
+      );
+    }
     return lines.join('\n');
   }
 
